@@ -1,6 +1,13 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { INTENT_CONFIGS, type Intent } from "@shared/intents";
 import type { CodeChange } from "@shared/types";
+
+export interface LiveRange {
+  intent: Intent;
+  lineStart: number;
+  lineEnd: number;
+  username: string;
+}
 
 interface CodeEditorProps {
   content: string;
@@ -11,7 +18,12 @@ interface CodeEditorProps {
   onContentChange: (content: string, intent: Intent) => void;
   showChangeHighlights?: boolean;
   compact?: boolean;
+  liveRanges?: LiveRange[];
+  onRangeChange?: (line: number, intent: Intent) => void;
 }
+
+const LINE_HEIGHT = 24;
+const EDITOR_PADDING_TOP = 8;
 
 export default function CodeEditor({
   content,
@@ -22,18 +34,32 @@ export default function CodeEditor({
   onContentChange,
   showChangeHighlights = true,
   compact = false,
+  liveRanges = [],
+  onRangeChange,
 }: CodeEditorProps) {
   const [lineCount, setLineCount] = useState(content.split("\n").length);
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorColumn, setCursorColumn] = useState(1);
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  const syncOverlayScroll = useCallback(() => {
+    if (textareaRef.current && overlayRef.current) {
+      overlayRef.current.style.transform = `translateY(-${textareaRef.current.scrollTop}px)`;
+    }
+  }, []);
+
   const handleContentChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newContent = e.currentTarget.value;
+      const beforeCursor = newContent.substring(0, e.currentTarget.selectionStart);
+      const line = beforeCursor.split("\n").length;
       onContentChange(newContent, currentIntent);
       setLineCount(newContent.split("\n").length);
+      onRangeChange?.(line, currentIntent);
     },
-    [currentIntent, onContentChange]
+    [currentIntent, onContentChange, onRangeChange]
   );
 
   const handleKeyDown = useCallback(
@@ -46,7 +72,6 @@ export default function CodeEditor({
       setCursorLine(line);
       setCursorColumn(selectionStart - lastNewline);
 
-      // Tab key support
       if (e.key === "Tab") {
         e.preventDefault();
         const start = textarea.selectionStart;
@@ -71,7 +96,6 @@ export default function CodeEditor({
     }
   });
 
-  // Group consecutive changed lines to render intent labels
   interface IntentRange { start: number; end: number; intent: Intent; username: string }
   const intentRanges: IntentRange[] = [];
   if (showChangeHighlights && fileChanges.length > 0) {
@@ -109,7 +133,7 @@ export default function CodeEditor({
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Line numbers */}
-        <div className="select-none overflow-hidden bg-card border-r border-border/50 text-right">
+        <div className="select-none overflow-hidden bg-card border-r border-border/50 text-right flex-shrink-0">
           <div className="pt-2 px-3">
             {Array.from({ length: lineCount }, (_, i) => (
               <div key={i + 1} className="font-mono text-[11px] leading-6 text-muted-foreground/60">{i + 1}</div>
@@ -117,44 +141,93 @@ export default function CodeEditor({
           </div>
         </div>
 
-        {/* Change indicator strip */}
-        {showChangeHighlights && (
-          <div className="w-1 overflow-hidden flex-shrink-0">
-            <div className="pt-2">
-              {Array.from({ length: lineCount }, (_, i) => {
-                const lineChanges = changesByLine.get(i + 1);
-                if (!lineChanges || lineChanges.length === 0) return <div key={i} className="h-6" />;
-                const last = lineChanges[lineChanges.length - 1];
-                return (
-                  <div
-                    key={i}
-                    className="h-6"
-                    style={{ background: INTENT_CONFIGS[last.intent]?.color ?? "transparent", opacity: 0.5 }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* Code area */}
         <div className="flex-1 relative overflow-hidden">
+
+          {/* ── Highlight overlay ─────────────────────────────────
+              Absolute, covers code area. Uses translateY to sync
+              with textarea scroll without React re-renders.      */}
+          <div
+            ref={overlayRef}
+            className="absolute inset-0 pointer-events-none"
+            aria-hidden="true"
+          >
+            {/* Saved-change line backgrounds (from activity history) */}
+            {showChangeHighlights && Array.from(changesByLine.entries()).map(([lineNum, lineChanges]) => {
+              const last = lineChanges[lineChanges.length - 1];
+              const cfg = INTENT_CONFIGS[last.intent];
+              if (!cfg) return null;
+              const top = EDITOR_PADDING_TOP + (lineNum - 1) * LINE_HEIGHT;
+              return (
+                <div
+                  key={`saved-${lineNum}`}
+                  className="absolute left-0 right-0"
+                  style={{
+                    top,
+                    height: LINE_HEIGHT,
+                    background: cfg.bgColor,
+                    borderLeft: `2px solid ${cfg.borderColor}`,
+                  }}
+                />
+              );
+            })}
+
+            {/* Live ranges from other collaborators */}
+            {liveRanges.map((range, idx) => {
+              const cfg = INTENT_CONFIGS[range.intent];
+              if (!cfg) return null;
+              const top = EDITOR_PADDING_TOP + (range.lineStart - 1) * LINE_HEIGHT;
+              const height = (range.lineEnd - range.lineStart + 1) * LINE_HEIGHT;
+              return (
+                <div key={`live-${idx}`}>
+                  {/* Colored line background */}
+                  <div
+                    className="absolute left-0 right-0"
+                    style={{
+                      top,
+                      height,
+                      background: cfg.bgColor,
+                      borderLeft: `3px solid ${cfg.color}`,
+                    }}
+                  />
+                  {/* Username tag at top of range */}
+                  <div
+                    className="absolute text-[9px] font-bold px-1.5 py-0.5 rounded-sm whitespace-nowrap"
+                    style={{
+                      top: top - 2,
+                      left: 4,
+                      background: cfg.color,
+                      color: "#fff",
+                      zIndex: 2,
+                      lineHeight: "14px",
+                    }}
+                  >
+                    {range.username}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Textarea — on top of the overlay */}
           <textarea
+            ref={textareaRef}
             value={content}
             onChange={handleContentChange}
             onKeyDown={handleKeyDown}
+            onScroll={syncOverlayScroll}
             className="absolute inset-0 w-full h-full resize-none bg-transparent font-mono text-[13px] text-foreground pt-2 px-4 focus:outline-none leading-6"
             spellCheck={false}
             style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', monospace", tabSize: 2 }}
           />
         </div>
 
-        {/* Intent range labels on the right edge */}
+        {/* Right-edge labels for saved intent ranges */}
         {showChangeHighlights && intentRanges.length > 0 && (
-          <div className="absolute right-2 top-0 pointer-events-none">
+          <div className="absolute right-2 top-0 pointer-events-none" style={{ zIndex: 3 }}>
             {intentRanges.map((range, idx) => {
               const cfg = INTENT_CONFIGS[range.intent];
-              const topPx = (range.start - 1) * 24 + 8;
+              const topPx = (range.start - 1) * LINE_HEIGHT + EDITOR_PADDING_TOP;
               return (
                 <div
                   key={idx}
@@ -162,6 +235,26 @@ export default function CodeEditor({
                   style={{ top: topPx, background: cfg.bgColor, color: cfg.color, border: `1px solid ${cfg.borderColor}` }}
                 >
                   {cfg.label.replace(" Development", " Dev")}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Right-edge labels for live collaborator ranges */}
+        {liveRanges.length > 0 && (
+          <div className="absolute right-2 top-0 pointer-events-none" style={{ zIndex: 4 }}>
+            {liveRanges.map((range, idx) => {
+              const cfg = INTENT_CONFIGS[range.intent];
+              if (!cfg) return null;
+              const topPx = (range.lineStart - 1) * LINE_HEIGHT + EDITOR_PADDING_TOP;
+              return (
+                <div
+                  key={`lr-${idx}`}
+                  className="absolute right-0 rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
+                  style={{ top: topPx, background: cfg.color }}
+                >
+                  {range.username} · {cfg.label.replace(" Development", " Dev")}
                 </div>
               );
             })}
