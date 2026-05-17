@@ -10,13 +10,9 @@ interface CodeEditorProps {
   changes: CodeChange[];
   onContentChange: (content: string, intent: Intent) => void;
   showChangeHighlights?: boolean;
+  compact?: boolean;
 }
 
-/**
- * Code Editor Component
- * Displays code with intent-based change highlighting
- * Tracks edits and shows change history
- */
 export default function CodeEditor({
   content,
   fileName,
@@ -25,6 +21,7 @@ export default function CodeEditor({
   changes,
   onContentChange,
   showChangeHighlights = true,
+  compact = false,
 }: CodeEditorProps) {
   const [lineCount, setLineCount] = useState(content.split("\n").length);
   const [cursorLine, setCursorLine] = useState(1);
@@ -42,146 +39,147 @@ export default function CodeEditor({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const textarea = e.currentTarget;
-      const text = textarea.value;
       const selectionStart = textarea.selectionStart;
-
-      // Calculate line and column
-      const beforeCursor = text.substring(0, selectionStart);
+      const beforeCursor = textarea.value.substring(0, selectionStart);
       const line = beforeCursor.split("\n").length;
       const lastNewline = beforeCursor.lastIndexOf("\n");
-      const column = selectionStart - lastNewline;
-
       setCursorLine(line);
-      setCursorColumn(column);
+      setCursorColumn(selectionStart - lastNewline);
+
+      // Tab key support
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const newVal = textarea.value.substring(0, start) + "  " + textarea.value.substring(end);
+        onContentChange(newVal, currentIntent);
+        requestAnimationFrame(() => {
+          textarea.selectionStart = textarea.selectionEnd = start + 2;
+        });
+      }
     },
-    []
+    [currentIntent, onContentChange]
   );
 
-  // Get changes for current file
-  const fileChanges = changes.filter((change) => {
-    // In a real app, would filter by file ID
-    return true;
-  });
+  const fileChanges = changes;
 
-  // Group changes by line
   const changesByLine = new Map<number, CodeChange[]>();
   fileChanges.forEach((change) => {
     for (let i = change.lineStart; i <= change.lineEnd; i++) {
-      if (!changesByLine.has(i)) {
-        changesByLine.set(i, []);
-      }
+      if (!changesByLine.has(i)) changesByLine.set(i, []);
       changesByLine.get(i)!.push(change);
     }
   });
 
-  const renderLineNumbers = () => {
-    return (
-      <div className="flex flex-col items-end pr-4 text-muted-foreground text-sm font-mono select-none">
-        {Array.from({ length: lineCount }, (_, i) => (
-          <div key={i + 1} className="h-6 leading-6">
-            {i + 1}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const renderChanges = () => {
-    if (!showChangeHighlights || fileChanges.length === 0) {
-      return null;
+  // Group consecutive changed lines to render intent labels
+  interface IntentRange { start: number; end: number; intent: Intent; username: string }
+  const intentRanges: IntentRange[] = [];
+  if (showChangeHighlights && fileChanges.length > 0) {
+    let current: IntentRange | null = null;
+    for (let i = 1; i <= lineCount; i++) {
+      const lineChanges = changesByLine.get(i);
+      if (lineChanges && lineChanges.length > 0) {
+        const last = lineChanges[lineChanges.length - 1];
+        if (!current || current.intent !== last.intent) {
+          if (current) intentRanges.push(current);
+          current = { start: i, end: i, intent: last.intent, username: last.username };
+        } else {
+          current.end = i;
+        }
+      } else {
+        if (current) { intentRanges.push(current); current = null; }
+      }
     }
-
-    return (
-      <div className="flex flex-col items-end pr-2 text-xs select-none">
-        {Array.from({ length: lineCount }, (_, i) => {
-          const lineNum = i + 1;
-          const lineChanges = changesByLine.get(lineNum);
-
-          if (!lineChanges || lineChanges.length === 0) {
-            return (
-              <div key={lineNum} className="h-6 leading-6 w-2">
-                &nbsp;
-              </div>
-            );
-          }
-
-          // Show indicator for most recent change
-          const lastChange = lineChanges[lineChanges.length - 1];
-          const config = INTENT_CONFIGS[lastChange.intent];
-
-          return (
-            <div
-              key={lineNum}
-              className="h-6 leading-6 w-2 rounded-l"
-              style={{
-                backgroundColor: config.color,
-                opacity: 0.6,
-              }}
-              title={`${lastChange.username} - ${config.label}`}
-            />
-          );
-        })}
-      </div>
-    );
-  };
+    if (current) intentRanges.push(current);
+  }
 
   return (
-    <div className="flex flex-col h-full bg-card">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-border">
-        <h2 className="text-lg font-semibold text-foreground">{fileName}</h2>
-        <p className="text-xs text-muted-foreground">
-          Language: {language} • Editing with intent:{" "}
-          <span
-            style={{ color: INTENT_CONFIGS[currentIntent].color }}
-            className="font-semibold"
-          >
-            {INTENT_CONFIGS[currentIntent].label}
-          </span>
-        </p>
-      </div>
+    <div className="flex flex-col h-full bg-background">
+      {!compact && (
+        <div className="px-4 py-3 border-b border-border bg-card">
+          <h2 className="text-sm font-semibold text-foreground">{fileName}</h2>
+          <p className="text-xs text-muted-foreground">
+            {language} · editing with{" "}
+            <span style={{ color: INTENT_CONFIGS[currentIntent].color }} className="font-semibold">
+              {INTENT_CONFIGS[currentIntent].label}
+            </span>
+          </p>
+        </div>
+      )}
 
-      {/* Editor */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Line numbers */}
-        <div className="bg-secondary/50 border-r border-border overflow-hidden">
-          {renderLineNumbers()}
+        <div className="select-none overflow-hidden bg-card border-r border-border/50 text-right">
+          <div className="pt-2 px-3">
+            {Array.from({ length: lineCount }, (_, i) => (
+              <div key={i + 1} className="font-mono text-[11px] leading-6 text-muted-foreground/60">{i + 1}</div>
+            ))}
+          </div>
         </div>
 
-        {/* Change indicators */}
+        {/* Change indicator strip */}
         {showChangeHighlights && (
-          <div className="bg-secondary/50 border-r border-border overflow-hidden">
-            {renderChanges()}
+          <div className="w-1 overflow-hidden flex-shrink-0">
+            <div className="pt-2">
+              {Array.from({ length: lineCount }, (_, i) => {
+                const lineChanges = changesByLine.get(i + 1);
+                if (!lineChanges || lineChanges.length === 0) return <div key={i} className="h-6" />;
+                const last = lineChanges[lineChanges.length - 1];
+                return (
+                  <div
+                    key={i}
+                    className="h-6"
+                    style={{ background: INTENT_CONFIGS[last.intent]?.color ?? "transparent", opacity: 0.5 }}
+                  />
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* Code textarea */}
-        <textarea
-          value={content}
-          onChange={handleContentChange}
-          onKeyDown={handleKeyDown}
-          className="flex-1 p-4 font-mono text-sm bg-card text-foreground resize-none focus:outline-none border-none"
-          spellCheck="false"
-          style={{
-            fontFamily: "IBM Plex Mono, monospace",
-            lineHeight: "1.5",
-            tabSize: 2,
-          }}
-        />
-      </div>
+        {/* Code area */}
+        <div className="flex-1 relative overflow-hidden">
+          <textarea
+            value={content}
+            onChange={handleContentChange}
+            onKeyDown={handleKeyDown}
+            className="absolute inset-0 w-full h-full resize-none bg-transparent font-mono text-[13px] text-foreground pt-2 px-4 focus:outline-none leading-6"
+            spellCheck={false}
+            style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', monospace", tabSize: 2 }}
+          />
+        </div>
 
-      {/* Footer */}
-      <div className="px-6 py-3 border-t border-border bg-secondary/50 flex items-center justify-between text-xs text-muted-foreground">
-        <span>
-          Line {cursorLine}, Column {cursorColumn}
-        </span>
-        <span>UTF-8 • {language} • LF</span>
-        {fileChanges.length > 0 && (
-          <span className="text-accent">
-            {fileChanges.length} change{fileChanges.length !== 1 ? "s" : ""}
-          </span>
+        {/* Intent range labels on the right edge */}
+        {showChangeHighlights && intentRanges.length > 0 && (
+          <div className="absolute right-2 top-0 pointer-events-none">
+            {intentRanges.map((range, idx) => {
+              const cfg = INTENT_CONFIGS[range.intent];
+              const topPx = (range.start - 1) * 24 + 8;
+              return (
+                <div
+                  key={idx}
+                  className="absolute right-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                  style={{ top: topPx, background: cfg.bgColor, color: cfg.color, border: `1px solid ${cfg.borderColor}` }}
+                >
+                  {cfg.label.replace(" Development", " Dev")}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
+
+      {!compact && (
+        <div className="px-4 py-2 border-t border-border bg-card flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>Ln {cursorLine}, Col {cursorColumn}</span>
+          <span>UTF-8 · {language} · LF</span>
+          {fileChanges.length > 0 && (
+            <span style={{ color: INTENT_CONFIGS[currentIntent].color }}>
+              {fileChanges.length} change{fileChanges.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
