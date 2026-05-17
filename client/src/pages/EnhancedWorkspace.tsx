@@ -1,4 +1,4 @@
-import CodeEditor from "@/components/CodeEditor";
+import CodeEditor, { type LiveRange } from "@/components/CodeEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -253,6 +253,17 @@ export default function EnhancedWorkspace() {
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pingTimeRef = useRef<number>(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const rangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // liveEdits tracks other collaborators' current editing position per userId
+  const [liveEdits, setLiveEdits] = useState<Map<string, {
+    intent: Intent;
+    lineStart: number;
+    lineEnd: number;
+    username: string;
+    fileId: string;
+    updatedAt: number;
+  }>>(new Map());
 
   const selectedFile = files.find((f) => f.id === activeTabId) ?? files[0];
 
@@ -379,6 +390,24 @@ export default function EnhancedWorkspace() {
                 );
               }
               break;
+            case "intent_range":
+              // Another collaborator is editing — show their intent highlight in the editor
+              if (payload.user?.id && payload.fileId && payload.intent) {
+                const senderId = String(payload.user.id);
+                setLiveEdits((prev) => {
+                  const next = new Map(prev);
+                  next.set(senderId, {
+                    intent: payload.intent as Intent,
+                    lineStart: payload.lineStart ?? 1,
+                    lineEnd: payload.lineEnd ?? 1,
+                    username: payload.user?.displayName || payload.user?.username || "Someone",
+                    fileId: payload.fileId,
+                    updatedAt: Date.now(),
+                  });
+                  return next;
+                });
+              }
+              break;
             case "activity":
               if (payload.item) setActivity((prev) => [payload.item, ...prev]);
               break;
@@ -418,6 +447,22 @@ export default function EnhancedWorkspace() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Purge stale live-edit highlights older than 5 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setLiveEdits((prev) => {
+        let changed = false;
+        const next = new Map(prev);
+        for (const [k, v] of next) {
+          if (now - v.updatedAt > 5000) { next.delete(k); changed = true; }
+        }
+        return changed ? next : prev;
+      });
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -496,6 +541,35 @@ export default function EnhancedWorkspace() {
     setIntent(next);
     socketRef.current?.send(JSON.stringify({ type: "intent_change", intent: next }));
   };
+
+  // Broadcast the line the current user is editing (debounced 150ms)
+  const handleRangeChange = useCallback((line: number, editIntent: Intent) => {
+    if (rangeDebounceRef.current) clearTimeout(rangeDebounceRef.current);
+    rangeDebounceRef.current = setTimeout(() => {
+      if (selectedFile && socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: "intent_range",
+          fileId: selectedFile.id,
+          intent: editIntent,
+          lineStart: line,
+          lineEnd: line,
+        }));
+      }
+    }, 150);
+  }, [selectedFile]);
+
+  // Collect live highlights from other collaborators for the currently open file
+  const liveRanges = useMemo<LiveRange[]>(() => {
+    if (!selectedFile) return [];
+    return Array.from(liveEdits.values())
+      .filter((e) => e.fileId === selectedFile.id)
+      .map((e) => ({
+        intent: e.intent,
+        lineStart: e.lineStart,
+        lineEnd: e.lineEnd,
+        username: e.username,
+      }));
+  }, [liveEdits, selectedFile?.id]);
 
   const unread = notifications.filter((n) => !n.is_read).length;
   const visibleMembers = showMoreMembers ? members : members.slice(0, 5);
@@ -778,6 +852,8 @@ export default function EnhancedWorkspace() {
               currentIntent={intent}
               changes={codeChanges}
               onContentChange={handleContentChange}
+              liveRanges={liveRanges}
+              onRangeChange={handleRangeChange}
               compact
             />
           </div>
