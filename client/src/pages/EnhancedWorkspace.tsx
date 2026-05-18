@@ -260,6 +260,7 @@ export default function EnhancedWorkspace() {
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [modifiedFiles, setModifiedFiles] = useState<Set<string>>(new Set());
   const [notifOpen, setNotifOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const [showMoreMembers, setShowMoreMembers] = useState(false);
   const [intentCounts, setIntentCounts] = useState<Record<string, number>>({});
   const socketRef = useRef<WebSocket | null>(null);
