@@ -8,46 +8,42 @@ import {
   type ApiActivity,
   type ApiChatMessage,
   type ApiFile,
+  type ApiJoinRequest,
   type ApiMember,
   type ApiNotification,
   type ApiWorkspace,
 } from "@/lib/api";
+import { useTheme } from "@/contexts/ThemeContext";
 import { INTENT_CONFIGS, INTENTS, type Intent } from "@shared/intents";
 import {
-  BarChart3,
   Bell,
+  Check,
   ChevronDown,
   ChevronRight,
   Circle,
   Code2,
-  Command,
   FileCode,
   FileJson,
   FilePlus2,
   FileText,
   Folder,
   FolderOpen,
-  GitBranch,
-  HelpCircle,
   Lock,
   LogOut,
   Menu,
-  MessageSquare,
+  Moon,
   MoreHorizontal,
   Paperclip,
-  Phone,
   Plus,
   RefreshCw,
   Save,
   Search,
   Settings,
-  Shield,
   Smile,
-  Terminal,
-  User,
+  Sun,
+  UserCheck,
   UserPlus,
   Users,
-  Video,
   Wifi,
   WifiOff,
   X,
@@ -223,10 +219,24 @@ const INTENT_ICON: Record<string, string> = {
   testing: "✅",
 };
 
+function detectLanguage(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    py: "python", js: "javascript", ts: "typescript", tsx: "typescript",
+    jsx: "javascript", html: "html", css: "css", scss: "scss",
+    json: "json", md: "markdown", txt: "plaintext", sh: "bash",
+    go: "go", rs: "rust", java: "java", rb: "ruby", php: "php",
+    c: "c", cpp: "cpp", yml: "yaml", yaml: "yaml", xml: "xml",
+    dockerfile: "dockerfile", toml: "toml", env: "plaintext",
+  };
+  return map[ext] ?? "plaintext";
+}
+
 export default function EnhancedWorkspace() {
   const [, navigate] = useLocation();
   const [workspaceId] = useState(queryWorkspaceId);
   const currentUser = getStoredUser();
+  const { theme, toggleTheme } = useTheme();
 
   const [workspace, setWorkspace] = useState<ApiWorkspace | null>(null);
   const [files, setFiles] = useState<ApiFile[]>([]);
@@ -234,6 +244,7 @@ export default function EnhancedWorkspace() {
   const [messages, setMessages] = useState<ApiChatMessage[]>([]);
   const [activity, setActivity] = useState<ApiActivity[]>([]);
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [joinRequests, setJoinRequests] = useState<ApiJoinRequest[]>([]);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [intent, setIntent] = useState<Intent>(INTENTS.FEATURE_DEVELOPMENT);
@@ -241,11 +252,12 @@ export default function EnhancedWorkspace() {
   const [latency, setLatency] = useState<number>(0);
   const [chatDraft, setChatDraft] = useState("");
   const [msgTab, setMsgTab] = useState<MsgTab>("general");
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [msgCollapsed, setMsgCollapsed] = useState(false);
+  const [newFileName, setNewFileName] = useState<string | null>(null);
+  const [leftOpen, setLeftOpen] = useState(() => window.innerWidth >= 1024);
+  const [rightOpen, setRightOpen] = useState(false);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [modifiedFiles, setModifiedFiles] = useState<Set<string>>(new Set());
-  const [commandOpen, setCommandOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [showMoreMembers, setShowMoreMembers] = useState(false);
   const [intentCounts, setIntentCounts] = useState<Record<string, number>>({});
@@ -254,6 +266,8 @@ export default function EnhancedWorkspace() {
   const pingTimeRef = useRef<number>(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const rangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newFileInputRef = useRef<HTMLInputElement | null>(null);
+  const mobileInitRef = useRef(false);
 
   // liveEdits tracks other collaborators' current editing position per userId
   const [liveEdits, setLiveEdits] = useState<Map<string, {
@@ -291,11 +305,17 @@ export default function EnhancedWorkspace() {
     const counts: Record<string, number> = {};
     activityData.forEach((a) => { if (a.intent) counts[a.intent] = (counts[a.intent] ?? 0) + 1; });
     setIntentCounts(counts);
-    // Open first-level folders by default
     const tree = buildFileTree(fileData);
     const topFolders = tree.filter((n) => n.type === "folder").map((n) => n.path);
     setOpenFolders(new Set(topFolders));
-  }, [workspaceId]);
+    // Load join requests if current user is admin
+    if (currentUser) {
+      const myMember = memberData.find((m) => m.user_id === currentUser.id);
+      if (myMember?.role === "admin") {
+        api.getJoinRequests(workspaceId).then(setJoinRequests).catch(() => {});
+      }
+    }
+  }, [workspaceId, currentUser]);
 
   useEffect(() => {
     loadWorkspace().catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load workspace"));
@@ -464,6 +484,14 @@ export default function EnhancedWorkspace() {
     return () => clearInterval(timer);
   }, []);
 
+  // On mobile: auto-show the file explorer once when files first load
+  useEffect(() => {
+    if (!mobileInitRef.current && files.length > 0 && window.innerWidth < 1024) {
+      setLeftOpen(true);
+      mobileInitRef.current = true;
+    }
+  }, [files.length]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -540,6 +568,52 @@ export default function EnhancedWorkspace() {
   const switchIntent = (next: Intent) => {
     setIntent(next);
     socketRef.current?.send(JSON.stringify({ type: "intent_change", intent: next }));
+  };
+
+  // Create a new blank file, prompt by name in the tab bar
+  const createNewFile = async () => {
+    if (newFileName === null || !newFileName.trim() || !workspace) return;
+    const name = newFileName.trim();
+    try {
+      const file = await api.createFile(workspace.id, {
+        name,
+        path: name,
+        language: detectLanguage(name),
+        content: "",
+      });
+      setFiles((prev) => [...prev, file]);
+      setOpenTabs((prev) => [...prev, file.id]);
+      setActiveTabId(file.id);
+      setNewFileName(null);
+      toast.success(`Created ${name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create file");
+    }
+  };
+
+  const approveJoin = async (requestId: string) => {
+    if (!workspaceId) return;
+    try {
+      await api.approveJoinRequest(workspaceId, requestId);
+      setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
+      api.members(workspaceId).then((data) =>
+        setMembers(data.map((m) => ({ ...m, status: "online" as MemberStatus })))
+      ).catch(() => {});
+      toast.success("Member approved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to approve");
+    }
+  };
+
+  const rejectJoin = async (requestId: string) => {
+    if (!workspaceId) return;
+    try {
+      await api.rejectJoinRequest(workspaceId, requestId);
+      setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
+      toast.success("Request rejected");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reject");
+    }
   };
 
   // Broadcast the line the current user is editing (debounced 150ms)
@@ -630,43 +704,38 @@ export default function EnhancedWorkspace() {
 
         {/* Right: actions */}
         <div className="flex items-center gap-1.5">
-          <Button size="sm" className="gap-1.5 h-7 text-xs px-2.5 hidden sm:flex">
-            <UserPlus className="h-3 w-3" /> Invite
-          </Button>
-          {/* Member avatars */}
-          <div className="hidden md:flex items-center -space-x-1.5">
-            {members.slice(0, 3).map((m) => (
-              <Avatar key={m.user_id} name={m.display_name || m.username} size={24} />
-            ))}
-            {members.length > 3 && (
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[10px] font-bold border border-border">
-                +{members.length - 3}
-              </span>
-            )}
-          </div>
-          <button className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground">
-            <Search className="h-4 w-4" />
-          </button>
+          {/* Notification bell */}
           <div className="relative">
             <button
               className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-              onClick={() => { setNotifOpen((v) => !v); setRightOpen(true); }}
+              onClick={() => setNotifOpen((v) => !v)}
             >
               <Bell className="h-4 w-4" />
-              {unread > 0 && (
+              {(unread + joinRequests.length) > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-white">
-                  {unread}
+                  {unread + joinRequests.length}
                 </span>
               )}
             </button>
-            {/* Notification dropdown */}
             {notifOpen && (
-              <div className="absolute right-0 top-8 z-50 w-72 rounded-lg border border-border bg-card shadow-xl" onClick={() => setNotifOpen(false)}>
+              <div className="absolute right-0 top-8 z-50 w-72 rounded-lg border border-border bg-card shadow-xl">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
                   <span className="text-xs font-semibold">Notifications</span>
-                  <button className="text-xs text-primary hover:underline">Mark all read</button>
+                  <button className="text-xs text-primary hover:underline" onClick={() => setNotifOpen(false)}>Close</button>
                 </div>
-                <div className="max-h-64 overflow-y-auto">
+                {joinRequests.length > 0 && (
+                  <div className="border-b border-border/50 bg-primary/5 px-3 py-2">
+                    <p className="text-xs font-semibold text-primary mb-1">{joinRequests.length} join request{joinRequests.length > 1 ? "s" : ""}</p>
+                    {joinRequests.map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 py-1">
+                        <span className="text-xs flex-1">{r.display_name} wants to join as {r.requested_role}</span>
+                        <button onClick={() => approveJoin(r.id)} className="text-[10px] text-green-400 hover:underline font-semibold">Approve</button>
+                        <button onClick={() => rejectJoin(r.id)} className="text-[10px] text-destructive hover:underline">Reject</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="max-h-52 overflow-y-auto">
                   {notifications.length === 0 ? (
                     <p className="p-3 text-xs text-muted-foreground">No notifications</p>
                   ) : notifications.slice(0, 8).map((n) => (
@@ -679,23 +748,23 @@ export default function EnhancedWorkspace() {
               </div>
             )}
           </div>
-          <button className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground hidden sm:block">
-            <HelpCircle className="h-4 w-4" />
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Toggle theme"
+          >
+            {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </button>
-          <button className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground">
-            <Settings className="h-4 w-4" />
-          </button>
+          {/* Team panel toggle */}
           <button
             onClick={() => setRightOpen((v) => !v)}
-            className="hidden lg:flex rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Team panel"
           >
             <Users className="h-4 w-4" />
           </button>
-          {currentUser && (
-            <div className="flex items-center gap-1">
-              <Avatar name={currentUser.display_name || currentUser.username} size={26} />
-            </div>
-          )}
+          {currentUser && <Avatar name={currentUser.display_name || currentUser.username} size={26} />}
           <button
             className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
             onClick={() => { clearAuth(); navigate("/"); }}
@@ -815,12 +884,37 @@ export default function EnhancedWorkspace() {
                   </div>
                 );
               })}
-              <button
-                className="flex items-center gap-1 border-r border-border px-3 py-2 text-xs text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
-                onClick={() => {}}
-              >
-                <Plus className="h-3 w-3" />
-              </button>
+              {newFileName !== null ? (
+                <div className="flex items-center gap-1 border-r border-border px-2 py-1.5">
+                  <input
+                    ref={newFileInputRef}
+                    type="text"
+                    value={newFileName}
+                    onChange={(e) => setNewFileName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createNewFile();
+                      if (e.key === "Escape") setNewFileName(null);
+                    }}
+                    placeholder="filename.py"
+                    className="w-28 bg-background text-xs text-foreground border border-primary rounded px-1.5 py-0.5 focus:outline-none"
+                    autoFocus
+                  />
+                  <button onClick={createNewFile} className="text-green-400 hover:text-green-300">
+                    <Check className="h-3 w-3" />
+                  </button>
+                  <button onClick={() => setNewFileName(null)} className="text-muted-foreground hover:text-foreground">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="flex items-center gap-1 border-r border-border px-3 py-2 text-xs text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
+                  onClick={() => setNewFileName("")}
+                  title="New file"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-1.5 px-3">
               {workspace && (
@@ -845,78 +939,104 @@ export default function EnhancedWorkspace() {
 
           {/* Code Editor */}
           <div className="min-h-0 flex-1 overflow-hidden">
-            <CodeEditor
-              content={selectedFile?.content ?? ""}
-              fileName={selectedFile?.path ?? "No file"}
-              language={selectedFile?.language ?? "typescript"}
-              currentIntent={intent}
-              changes={codeChanges}
-              onContentChange={handleContentChange}
-              liveRanges={liveRanges}
-              onRangeChange={handleRangeChange}
-              compact
-            />
+            {selectedFile ? (
+              <CodeEditor
+                content={selectedFile.content}
+                fileName={selectedFile.path}
+                language={selectedFile.language}
+                currentIntent={intent}
+                changes={codeChanges}
+                onContentChange={handleContentChange}
+                liveRanges={liveRanges}
+                onRangeChange={handleRangeChange}
+                compact
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                <FilePlus2 className="h-10 w-10 opacity-30" />
+                <p className="text-sm">No file open</p>
+                <p className="text-xs opacity-60">
+                  {window.innerWidth < 1024
+                    ? "Tap ☰ to open the file explorer"
+                    : "Select a file from the explorer or create a new one"}
+                </p>
+                <button
+                  className="mt-1 flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary"
+                  onClick={() => setNewFileName("")}
+                >
+                  <Plus className="h-3 w-3" /> New file
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Messaging Section */}
-          <div className="flex h-[220px] shrink-0 flex-col border-t border-border bg-card">
+          <div className={`shrink-0 flex flex-col border-t border-border bg-card transition-all ${msgCollapsed ? "h-9" : "h-[200px] sm:h-[220px]"}`}>
             <div className="flex items-center justify-between border-b border-border px-4 py-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Messaging</span>
-              <div className="flex items-center gap-1">
-                <button className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"><Phone className="h-3.5 w-3.5" /></button>
-                <button className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"><Video className="h-3.5 w-3.5" /></button>
-                <button className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"><Users className="h-3.5 w-3.5" /></button>
-                <button className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"><MoreHorizontal className="h-3.5 w-3.5" /></button>
-              </div>
+              <button
+                onClick={() => setMsgCollapsed((v) => !v)}
+                className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                title={msgCollapsed ? "Expand chat" : "Collapse chat"}
+              >
+                {msgCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
             </div>
-            {/* Tabs */}
-            <div className="flex border-b border-border text-xs">
-              {(["general", "thread", "mentions"] as MsgTab[]).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setMsgTab(tab)}
-                  className={`px-4 py-2 capitalize transition-colors ${msgTab === tab ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-            {/* Messages */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 space-y-2">
-              {messages.map((msg) => (
-                <div key={msg.id} className="flex items-start gap-2">
-                  <Avatar name={msg.username} size={22} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-xs font-semibold">{msg.username}</span>
-                      <span className="text-[10px] text-muted-foreground">{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                      {msg.intent && (
-                        <span className="rounded px-1 text-[9px]" style={{ background: INTENT_CONFIGS[msg.intent]?.bgColor, color: INTENT_CONFIGS[msg.intent]?.color }}>
-                          {INTENT_CONFIGS[msg.intent]?.label}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{msg.content}</p>
-                  </div>
+            {!msgCollapsed && (
+              <>
+                {/* Tabs */}
+                <div className="flex border-b border-border text-xs">
+                  {(["general", "thread", "mentions"] as MsgTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setMsgTab(tab)}
+                      className={`px-4 py-2 capitalize transition-colors ${msgTab === tab ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
                 </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            {/* Input */}
-            <div className="flex items-center gap-2 border-t border-border px-3 py-2">
-              <Input
-                className="h-7 flex-1 text-xs"
-                placeholder="Type a message..."
-                value={chatDraft}
-                onChange={(e) => setChatDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              />
-              <button className="text-muted-foreground hover:text-foreground"><Smile className="h-4 w-4" /></button>
-              <button className="text-muted-foreground hover:text-foreground"><Paperclip className="h-4 w-4" /></button>
-              <Button size="sm" className="h-7 w-7 p-0" onClick={sendMessage} disabled={!chatDraft.trim()}>
-                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current"><path d="M2 21l21-9L2 3v7l15 2-15 2z" /></svg>
-              </Button>
-            </div>
+                {/* Messages */}
+                <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 space-y-2">
+                  {messages.length === 0 && (
+                    <p className="py-2 text-center text-xs text-muted-foreground">No messages yet. Say hi!</p>
+                  )}
+                  {messages.map((msg) => (
+                    <div key={msg.id} className="flex items-start gap-2">
+                      <Avatar name={msg.username} size={22} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-xs font-semibold">{msg.username}</span>
+                          <span className="text-[10px] text-muted-foreground">{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          {msg.intent && (
+                            <span className="rounded px-1 text-[9px]" style={{ background: INTENT_CONFIGS[msg.intent]?.bgColor, color: INTENT_CONFIGS[msg.intent]?.color }}>
+                              {INTENT_CONFIGS[msg.intent]?.label}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{msg.content}</p>
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+                {/* Input */}
+                <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+                  <Input
+                    className="h-7 flex-1 text-xs"
+                    placeholder="Type a message..."
+                    value={chatDraft}
+                    onChange={(e) => setChatDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  />
+                  <button className="text-muted-foreground hover:text-foreground"><Smile className="h-4 w-4" /></button>
+                  <button className="text-muted-foreground hover:text-foreground"><Paperclip className="h-4 w-4" /></button>
+                  <Button size="sm" className="h-7 w-7 p-0" onClick={sendMessage} disabled={!chatDraft.trim()}>
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current"><path d="M2 21l21-9L2 3v7l15 2-15 2z" /></svg>
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
@@ -933,6 +1053,41 @@ export default function EnhancedWorkspace() {
           ].join(" ")}
           style={{ top: 45 }}
         >
+          {/* Join Requests (admin only) */}
+          {joinRequests.length > 0 && (
+            <>
+              <div className="flex items-center gap-2 border-b border-border bg-primary/5 px-4 py-2.5 shrink-0">
+                <UserCheck className="h-3.5 w-3.5 text-primary" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-primary flex-1">Join Requests ({joinRequests.length})</span>
+              </div>
+              <div className="border-b border-border shrink-0">
+                {joinRequests.map((r) => (
+                  <div key={r.id} className="flex items-center gap-2 px-4 py-2.5 hover:bg-secondary/20">
+                    <Avatar name={r.display_name} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold truncate">{r.display_name}</p>
+                      <p className="text-[10px] text-muted-foreground capitalize">Wants to join as {r.requested_role}</p>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => approveJoin(r.id)}
+                        className="flex items-center gap-0.5 rounded bg-green-500/20 px-2 py-0.5 text-[10px] font-semibold text-green-400 hover:bg-green-500/40"
+                      >
+                        <Check className="h-2.5 w-2.5" /> Approve
+                      </button>
+                      <button
+                        onClick={() => rejectJoin(r.id)}
+                        className="rounded bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive/20"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
           {/* Team Members */}
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Team Members</span>
