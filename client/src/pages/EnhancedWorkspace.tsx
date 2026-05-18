@@ -850,7 +850,13 @@ export default function EnhancedWorkspace() {
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Explorer</span>
             <div className="flex gap-0.5">
-              <button className="rounded p-0.5 hover:bg-secondary text-muted-foreground"><FilePlus2 className="h-3 w-3" /></button>
+              <button
+                className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                onClick={() => setNewFileName("")}
+                title="New file"
+              >
+                <FilePlus2 className="h-3 w-3" />
+              </button>
               <button className="rounded p-0.5 hover:bg-secondary text-muted-foreground"><RefreshCw className="h-3 w-3" /></button>
               <button className="rounded p-0.5 hover:bg-secondary text-muted-foreground"><MoreHorizontal className="h-3 w-3" /></button>
             </div>
@@ -907,11 +913,11 @@ export default function EnhancedWorkspace() {
         {/* ── CENTER PANE ─────────────────────────────────────── */}
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Collaboration Intents Bar */}
-          <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-2 shrink-0">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+          <div className="flex min-w-0 items-center gap-3 border-b border-border bg-card px-4 py-2 shrink-0">
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
               Collaboration Intents
             </span>
-            <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5">
+            <div className="flex min-w-0 flex-1 snap-x gap-2 overflow-x-auto overscroll-x-contain pb-1">
               {Object.entries(INTENT_CONFIGS).map(([key, cfg]) => {
                 const count = intentCounts[key] ?? 0;
                 const isActive = intent === key;
@@ -919,17 +925,17 @@ export default function EnhancedWorkspace() {
                   <button
                     key={key}
                     onClick={() => switchIntent(key as Intent)}
-                    className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors ${isActive ? "border-transparent text-white" : "border-border text-muted-foreground hover:border-border/80 hover:text-foreground"}`}
+                    className={`flex h-8 min-w-[132px] shrink-0 snap-start items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors sm:min-w-[156px] ${isActive ? "border-transparent text-white" : "border-border text-muted-foreground hover:border-border/80 hover:text-foreground"}`}
                     style={isActive ? { background: cfg.color } : { background: cfg.bgColor }}
                   >
-                    <span>{INTENT_ICON[key]}</span>
-                    <span className="font-medium">{cfg.label.replace(" Development", " Dev")}</span>
-                    <span className="ml-0.5 opacity-70">{count} Active</span>
+                    <span className="shrink-0">{INTENT_ICON[key]}</span>
+                    <span className="min-w-0 truncate font-medium">{cfg.label.replace(" Development", " Dev")}</span>
+                    <span className="shrink-0 opacity-70">{count}</span>
                   </button>
                 );
               })}
             </div>
-            <button className="flex items-center gap-1 text-[10px] text-primary hover:underline whitespace-nowrap">
+            <button className="hidden shrink-0 items-center gap-1 text-[10px] text-primary hover:underline whitespace-nowrap sm:flex">
               View all intents <ChevronRight className="h-3 w-3" />
             </button>
           </div>
