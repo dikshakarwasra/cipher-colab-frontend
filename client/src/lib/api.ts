@@ -79,6 +79,14 @@ export interface ApiNotification {
   created_at: string;
 }
 
+export interface ApiJoinRequest {
+  id: string;
+  user_id: number;
+  display_name: string;
+  requested_role: "admin" | "editor" | "viewer";
+  created_at: string;
+}
+
 const ACCESS_KEY = "cipher-collab-access-token";
 const REFRESH_KEY = "cipher-collab-refresh-token";
 const USER_KEY = "cipher-collab-user";
@@ -186,6 +194,12 @@ export const api = {
     request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/files/${fileId}/lock`, { method: "POST", body: JSON.stringify({ locked }) }),
   freezeWorkspace: (workspaceId: string, frozen: boolean) =>
     request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/freeze`, { method: "POST", body: JSON.stringify({ frozen }) }),
+  getJoinRequests: (workspaceId: string) =>
+    request<ApiJoinRequest[]>(`/workspaces/${workspaceId}/admin/join-requests`),
+  approveJoinRequest: (workspaceId: string, requestId: string) =>
+    request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/join-requests/${requestId}/approve`, { method: "POST" }),
+  rejectJoinRequest: (workspaceId: string, requestId: string) =>
+    request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/join-requests/${requestId}/reject`, { method: "POST" }),
 };
 
 export function createWorkspaceSocket(workspaceId: string) {
