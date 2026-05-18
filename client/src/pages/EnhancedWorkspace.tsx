@@ -255,7 +255,8 @@ export default function EnhancedWorkspace() {
   const [msgCollapsed, setMsgCollapsed] = useState(false);
   const [newFileName, setNewFileName] = useState<string | null>(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth >= 1024);
-  const [rightOpen, setRightOpen] = useState(false);
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 1024 : false;
+  const [rightOpen, setRightOpen] = useState(() => window.innerWidth >= 1024);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [modifiedFiles, setModifiedFiles] = useState<Set<string>>(new Set());
   const [notifOpen, setNotifOpen] = useState(false);
@@ -718,8 +719,10 @@ export default function EnhancedWorkspace() {
               )}
             </button>
             {notifOpen && (
-              <div className="absolute right-0 top-8 z-50 w-72 rounded-lg border border-border bg-card shadow-xl">
-                <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <div className={`absolute z-50 rounded-lg border border-border bg-card shadow-xl ${
+                isMobile ? 'inset-0 m-auto w-11/12 max-h-96' : 'right-0 top-8 w-72'
+              }`}>
+                <div className="flex items-center justify-between border-b border-border px-3 py-2 shrink-0">
                   <span className="text-xs font-semibold">Notifications</span>
                   <button className="text-xs text-primary hover:underline" onClick={() => setNotifOpen(false)}>Close</button>
                 </div>
@@ -735,7 +738,7 @@ export default function EnhancedWorkspace() {
                     ))}
                   </div>
                 )}
-                <div className="max-h-52 overflow-y-auto">
+                <div className="max-h-64 overflow-y-auto">
                   {notifications.length === 0 ? (
                     <p className="p-3 text-xs text-muted-foreground">No notifications</p>
                   ) : notifications.slice(0, 8).map((n) => (
@@ -1029,8 +1032,6 @@ export default function EnhancedWorkspace() {
                     onChange={(e) => setChatDraft(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                   />
-                  <button className="text-muted-foreground hover:text-foreground"><Smile className="h-4 w-4" /></button>
-                  <button className="text-muted-foreground hover:text-foreground"><Paperclip className="h-4 w-4" /></button>
                   <Button size="sm" className="h-7 w-7 p-0" onClick={sendMessage} disabled={!chatDraft.trim()}>
                     <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current"><path d="M2 21l21-9L2 3v7l15 2-15 2z" /></svg>
                   </Button>
@@ -1049,7 +1050,7 @@ export default function EnhancedWorkspace() {
             "fixed inset-y-0 right-0 z-50 w-72 transition-transform",
             rightOpen ? "translate-x-0" : "translate-x-full",
             "lg:static lg:z-auto lg:translate-x-0 lg:transition-[width]",
-            rightOpen ? "lg:w-72" : "lg:w-0",
+            "lg:w-72",
           ].join(" ")}
           style={{ top: 45 }}
         >
@@ -1169,14 +1170,7 @@ export default function EnhancedWorkspace() {
                       )}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-5 px-1.5 text-[10px] flex-shrink-0"
-                    onClick={() => toast.info("Restore not yet implemented")}
-                  >
-                    Restore
-                  </Button>
+
                 </div>
               );
             })}
