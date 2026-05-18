@@ -239,7 +239,7 @@ function detectLanguage(filename: string): string {
 export default function EnhancedWorkspace() {
   const [, navigate] = useLocation();
   const [workspaceId] = useState(queryWorkspaceId);
-  const currentUser = getStoredUser();
+  const [currentUser] = useState(getStoredUser);
   const { theme, toggleTheme } = useTheme();
 
   const [workspace, setWorkspace] = useState<ApiWorkspace | null>(null);
