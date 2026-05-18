@@ -902,7 +902,6 @@ export default function EnhancedWorkspace() {
                 <SecurityLogs />
               </div>
             )}
-          </div>
         </aside>
 
         {/* ── CENTER PANE ─────────────────────────────────────── */}
@@ -1321,6 +1320,7 @@ export default function EnhancedWorkspace() {
             >
               <X className="h-3.5 w-3.5" />
             </button>
+            </div>
             </div>
 
             {/* Expanded Content: Versions or Security Logs */}
