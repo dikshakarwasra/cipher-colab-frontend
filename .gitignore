@@ -13,4 +13,6 @@ pnpm-debug.log*
 Thumbs.db
 coverage/
 .nyc_output/
+*.pem
+*.pem~
 

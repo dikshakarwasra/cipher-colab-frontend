@@ -79,6 +79,14 @@ export interface ApiNotification {
   created_at: string;
 }
 
+export interface ApiJoinRequest {
+  id: string;
+  user_id: number;
+  display_name: string;
+  requested_role: "admin" | "editor" | "viewer";
+  created_at: string;
+}
+
 export interface ApiVersion {
   id: string;
   file_id: string;
