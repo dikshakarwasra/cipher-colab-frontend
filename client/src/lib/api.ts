@@ -79,12 +79,28 @@ export interface ApiNotification {
   created_at: string;
 }
 
-export interface ApiJoinRequest {
+export interface ApiVersion {
   id: string;
-  user_id: number;
-  display_name: string;
-  requested_role: "admin" | "editor" | "viewer";
+  file_id: string;
+  version_number: number;
+  content: string;
+  created_by: number;
+  message?: string | null;
   created_at: string;
+}
+
+export interface ApiSecurityLog {
+  id: string;
+  event: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  details?: string | null;
+  created_at: string;
+}
+
+export interface ApiIntentSummary {
+  intent: string;
+  count: number;
 }
 
 const ACCESS_KEY = "cipher-collab-access-token";
@@ -188,8 +204,14 @@ export const api = {
   sendChat: (workspaceId: string, payload: { content: string; intent?: Intent }) =>
     request<ApiChatMessage>(`/workspaces/${workspaceId}/chat`, { method: "POST", body: JSON.stringify(payload) }),
   activity: (workspaceId: string) => request<ApiActivity[]>(`/workspaces/${workspaceId}/activity`),
+  intentSummary: (workspaceId: string) => request<ApiIntentSummary[]>(`/workspaces/${workspaceId}/intents/summary`),
+  fileVersions: (workspaceId: string, fileId: string) => request<ApiVersion[]>(`/workspaces/${workspaceId}/files/${fileId}/versions`),
+  restoreVersion: (workspaceId: string, fileId: string, versionId: string) =>
+    request<ApiFile>(`/workspaces/${workspaceId}/files/${fileId}/versions/${versionId}/restore`, { method: "POST" }),
   notifications: () => request<ApiNotification[]>("/notifications"),
   markNotificationRead: (id: string) => request<{ success: boolean }>(`/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: () => request<{ success: boolean }>("/notifications/read-all", { method: "POST" }),
+  securityLogs: () => request<ApiSecurityLog[]>("/security/logs"),
   lockFile: (workspaceId: string, fileId: string, locked: boolean) =>
     request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/files/${fileId}/lock`, { method: "POST", body: JSON.stringify({ locked }) }),
   freezeWorkspace: (workspaceId: string, frozen: boolean) =>
@@ -200,6 +222,14 @@ export const api = {
     request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/join-requests/${requestId}/approve`, { method: "POST" }),
   rejectJoinRequest: (workspaceId: string, requestId: string) =>
     request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/join-requests/${requestId}/reject`, { method: "POST" }),
+  changeRole: (workspaceId: string, userId: number, role: "admin" | "editor" | "viewer") =>
+    request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/roles`, { method: "POST", body: JSON.stringify({ user_id: userId, role }) }),
+  muteMember: (workspaceId: string, userId: number, muted: boolean) =>
+    request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/members/${userId}/mute`, { method: "POST", body: JSON.stringify({ muted }) }),
+  removeMember: (workspaceId: string, userId: number) =>
+    request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/members/${userId}`, { method: "DELETE" }),
+  inviteUser: (workspaceId: string, username: string, role: "admin" | "editor" | "viewer") =>
+    request<{ success: boolean }>(`/workspaces/${workspaceId}/admin/invite`, { method: "POST", body: JSON.stringify({ username, role }) }),
 };
 
 export function createWorkspaceSocket(workspaceId: string) {

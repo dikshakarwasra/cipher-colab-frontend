@@ -1,6 +1,8 @@
 import CodeEditor, { type LiveRange } from "@/components/CodeEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import VersionHistory from "@/components/VersionHistory";
+import SecurityLogs from "@/components/SecurityLogs";
 import {
   api,
   createWorkspaceSocket,
@@ -12,6 +14,7 @@ import {
   type ApiMember,
   type ApiNotification,
   type ApiWorkspace,
+  type ApiVersion,
 } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
 import { INTENT_CONFIGS, INTENTS, type Intent } from "@shared/intents";
@@ -39,6 +42,7 @@ import {
   Save,
   Search,
   Settings,
+  Shield,
   Smile,
   Sun,
   UserCheck,
@@ -263,6 +267,10 @@ export default function EnhancedWorkspace() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [showMoreMembers, setShowMoreMembers] = useState(false);
   const [intentCounts, setIntentCounts] = useState<Record<string, number>>({});
+  const [showVersions, setShowVersions] = useState(false);
+  const [showSecurityLogs, setShowSecurityLogs] = useState(false);
+  const [inviteUsername, setInviteUsername] = useState("");
+  const [showInvite, setShowInvite] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pingTimeRef = useRef<number>(0);
@@ -299,6 +307,13 @@ export default function EnhancedWorkspace() {
     setMessages(chatData);
     setActivity(activityData);
     setNotifications(notifData);
+
+    api.intentSummary(workspaceId).then(summaries => {
+      const counts: Record<string, number> = {};
+      summaries.forEach(s => counts[s.intent] = s.count);
+      setIntentCounts(counts);
+    }).catch(() => {});
+
     if (fileData.length > 0) {
       const initialIds = fileData.slice(0, 4).map((f) => f.id);
       setOpenTabs(initialIds);
@@ -355,6 +370,15 @@ export default function EnhancedWorkspace() {
           switch (payload.type) {
             case "pong":
               setLatency(Date.now() - pingTimeRef.current);
+              break;
+            case "presence_sync":
+              if (payload.online_user_ids) {
+                const onlineIds = new Set(payload.online_user_ids);
+                setMembers((prev) => prev.map((m) => ({
+                  ...m,
+                  status: onlineIds.has(m.user_id) ? "online" : "offline"
+                })));
+              }
               break;
             case "chat_message":
               if (payload.message) setMessages((prev) => [...prev, payload.message]);
@@ -444,10 +468,10 @@ export default function EnhancedWorkspace() {
     // Periodic refresh fallback
     const refreshInterval = setInterval(() => {
       api.notifications().then(setNotifications).catch(() => {});
-      api.activity(workspaceId).then((data) => {
-        setActivity(data);
+      api.activity(workspaceId).then(setActivity).catch(() => {});
+      api.intentSummary(workspaceId).then(summaries => {
         const counts: Record<string, number> = {};
-        data.forEach((a) => { if (a.intent) counts[a.intent] = (counts[a.intent] ?? 0) + 1; });
+        summaries.forEach(s => counts[s.intent] = s.count);
         setIntentCounts(counts);
       }).catch(() => {});
       api.members(workspaceId).then((data) => {
@@ -651,6 +675,19 @@ export default function EnhancedWorkspace() {
   const visibleMembers = showMoreMembers ? members : members.slice(0, 5);
   const extraMembers = Math.max(0, members.length - 5);
 
+  const handleInvite = async () => {
+    if (!workspaceId || !inviteUsername.trim()) return;
+    try {
+      await api.inviteUser(workspaceId, inviteUsername.trim(), "editor");
+      toast.success(`Invited ${inviteUsername}`);
+      setInviteUsername("");
+      setShowInvite(false);
+      loadWorkspace();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to invite");
+    }
+  };
+
   const codeChanges = useMemo(
     () =>
       activity
@@ -725,7 +762,15 @@ export default function EnhancedWorkspace() {
               }`}>
                 <div className="flex items-center justify-between border-b border-border px-3 py-2 shrink-0">
                   <span className="text-xs font-semibold">Notifications</span>
-                  <button className="text-xs text-primary hover:underline" onClick={() => setNotifOpen(false)}>Close</button>
+                  <div className="flex gap-2">
+                    <button
+                      className="text-[10px] text-primary hover:underline"
+                      onClick={() => api.markAllNotificationsRead().then(loadWorkspace)}
+                    >
+                      Mark all read
+                    </button>
+                    <button className="text-[10px] text-muted-foreground hover:underline" onClick={() => setNotifOpen(false)}>Close</button>
+                  </div>
                 </div>
                 {joinRequests.length > 0 && (
                   <div className="border-b border-border/50 bg-primary/5 px-3 py-2">
@@ -759,6 +804,13 @@ export default function EnhancedWorkspace() {
             title="Toggle theme"
           >
             {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </button>
+          <button
+            onClick={() => { setShowSecurityLogs(v => !v); setShowVersions(false); setRightOpen(true); }}
+            className={`rounded p-1.5 transition-colors ${showSecurityLogs ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
+            title="Security Audit"
+          >
+            <Shield className="h-4 w-4" />
           </button>
           {/* Team panel toggle */}
           <button
@@ -829,6 +881,27 @@ export default function EnhancedWorkspace() {
               />
               <span className="text-muted-foreground">{connection === "connected" ? `${latency}ms` : connection}</span>
             </div>
+            </div>
+
+            {/* Expanded Content: Versions or Security Logs */}
+            {showVersions && selectedFile && (
+              <div className="flex-1 min-w-0 h-full border-l border-border">
+                <VersionHistory
+                  workspaceId={workspaceId}
+                  fileId={selectedFile.id}
+                  onRestore={(updated) => {
+                    setFiles(prev => prev.map(f => f.id === updated.id ? updated : f));
+                    setShowVersions(false);
+                  }}
+                />
+              </div>
+            )}
+
+            {showSecurityLogs && (
+              <div className="flex-1 min-w-0 h-full border-l border-border">
+                <SecurityLogs />
+              </div>
+            )}
           </div>
         </aside>
 
@@ -935,6 +1008,13 @@ export default function EnhancedWorkspace() {
               <Button size="sm" className="h-7 gap-1.5 text-xs px-2.5" onClick={saveFile}>
                 <Save className="h-3 w-3" /> Save
               </Button>
+              <button
+                onClick={() => { setShowVersions(v => !v); setShowSecurityLogs(false); setRightOpen(true); }}
+                className={`rounded p-1 transition-colors ${showVersions ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
+                title="Version History"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
               <button className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground">
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
@@ -1047,16 +1127,19 @@ export default function EnhancedWorkspace() {
         {rightOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setRightOpen(false)} />}
         <aside
           className={[
-            "flex flex-col shrink-0 border-l border-border bg-card overflow-hidden",
-            "fixed inset-y-0 right-0 z-50 w-72 transition-transform",
+            "flex flex-col shrink-0 border-l border-border bg-card overflow-hidden transition-all",
+            "fixed inset-y-0 right-0 z-50 transition-transform",
             rightOpen ? "translate-x-0" : "translate-x-full",
             "lg:static lg:z-auto lg:translate-x-0 lg:transition-[width]",
-            "lg:w-72",
+            rightOpen ? (showVersions || showSecurityLogs ? "lg:w-[600px]" : "lg:w-72") : "lg:w-0",
           ].join(" ")}
           style={{ top: 45 }}
         >
-          {/* Join Requests (admin only) */}
-          {joinRequests.length > 0 && (
+          <div className="flex h-full">
+            {/* Standard Right Pane (Team & Activity) */}
+            <div className="flex flex-col w-72 shrink-0 border-r border-border h-full overflow-hidden">
+              {/* Join Requests (admin only) */}
+              {joinRequests.length > 0 && (
             <>
               <div className="flex items-center gap-2 border-b border-border bg-primary/5 px-4 py-2.5 shrink-0">
                 <UserCheck className="h-3.5 w-3.5 text-primary" />
@@ -1093,10 +1176,31 @@ export default function EnhancedWorkspace() {
           {/* Team Members */}
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Team Members</span>
-            <button className="flex items-center gap-1 text-[10px] font-medium text-primary hover:underline">
+            <button
+              onClick={() => setShowInvite(v => !v)}
+              className="flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
+            >
               <Plus className="h-3 w-3" /> Invite
             </button>
           </div>
+
+          {showInvite && (
+            <div className="p-3 bg-secondary/20 border-b border-border space-y-2">
+              <Input
+                size={1}
+                className="h-7 text-xs"
+                placeholder="Username to invite..."
+                value={inviteUsername}
+                onChange={e => setInviteUsername(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleInvite()}
+              />
+              <div className="flex gap-2">
+                <Button size="sm" className="h-6 flex-1 text-[10px]" onClick={handleInvite}>Send Invite</Button>
+                <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => setShowInvite(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-y-auto border-b border-border">
             {visibleMembers.map((m) => {
               const isYou = currentUser && m.user_id === currentUser.id;
@@ -1105,7 +1209,7 @@ export default function EnhancedWorkspace() {
                 ? files.find((f) => f.id === m.editingFile)?.name ?? m.editingFile
                 : null;
               return (
-                <div key={m.user_id} className="flex items-center gap-2.5 px-4 py-2 hover:bg-secondary/30">
+                <div key={m.user_id} className="flex items-center gap-2.5 px-4 py-2 hover:bg-secondary/30 group">
                   <div className="relative flex-shrink-0">
                     <Avatar name={m.display_name || m.username} size={32} />
                     <span
@@ -1123,6 +1227,27 @@ export default function EnhancedWorkspace() {
                       {editingFileName ?? (m.editingFile ? "editing..." : m.username)}
                     </div>
                   </div>
+
+                  {/* Admin Actions */}
+                  {currentUser && members.find(m => m.user_id === currentUser.id)?.role === "admin" && !isYou && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => api.muteMember(workspaceId, m.user_id, !m.muted_chat).then(loadWorkspace)}
+                        className={`p-1 rounded hover:bg-secondary ${m.muted_chat ? "text-destructive" : "text-muted-foreground"}`}
+                        title={m.muted_chat ? "Unmute" : "Mute"}
+                      >
+                        <Smile className={`h-3 w-3 ${m.muted_chat ? "line-through" : ""}`} />
+                      </button>
+                      <button
+                        onClick={() => api.removeMember(workspaceId, m.user_id).then(loadWorkspace)}
+                        className="p-1 rounded hover:bg-secondary text-destructive"
+                        title="Remove member"
+                      >
+                        <LogOut className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+
                   <span
                     className="text-[10px] font-medium capitalize flex-shrink-0"
                     style={{ color: statusColor }}
@@ -1196,6 +1321,27 @@ export default function EnhancedWorkspace() {
             >
               <X className="h-3.5 w-3.5" />
             </button>
+            </div>
+
+            {/* Expanded Content: Versions or Security Logs */}
+            {showVersions && selectedFile && (
+              <div className="flex-1 min-w-0 h-full border-l border-border">
+                <VersionHistory
+                  workspaceId={workspaceId}
+                  fileId={selectedFile.id}
+                  onRestore={(updated) => {
+                    setFiles(prev => prev.map(f => f.id === updated.id ? updated : f));
+                    setShowVersions(false);
+                  }}
+                />
+              </div>
+            )}
+
+            {showSecurityLogs && (
+              <div className="flex-1 min-w-0 h-full border-l border-border">
+                <SecurityLogs />
+              </div>
+            )}
           </div>
         </aside>
       </div>
