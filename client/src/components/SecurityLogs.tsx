@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type ApiSecurityLog } from "@/lib/api";
 import { Shield, ShieldAlert, Globe, Monitor, Clock } from "lucide-react";
-import { format } from "date-fns";
 import { toast } from "sonner";
+import { formatLocalTimestamp } from "@/lib/time";
 
 export default function SecurityLogs() {
   const [logs, setLogs] = useState<ApiSecurityLog[]>([]);
@@ -17,7 +17,7 @@ export default function SecurityLogs() {
   }, []);
 
   return (
-    <div className="flex flex-col h-full bg-card border-l border-border max-w-md w-full">
+    <div className="flex flex-col h-full bg-[rgba(17,24,39,0.75)] border-l border-white/10 max-w-md w-full backdrop-blur">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Shield className="h-4 w-4 text-primary" />
         <h3 className="text-xs font-bold uppercase tracking-wider">Security Logs</h3>
@@ -59,7 +59,7 @@ export default function SecurityLogs() {
                       )}
                       <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                         <Clock className="h-3 w-3" />
-                        <span>{format(new Date(log.created_at), "MMM d, yyyy HH:mm:ss")}</span>
+                        <span>{formatLocalTimestamp(log.created_at)}</span>
                       </div>
                     </div>
                   </div>

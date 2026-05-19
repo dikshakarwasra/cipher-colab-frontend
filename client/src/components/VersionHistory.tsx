@@ -4,6 +4,7 @@ import { History, RotateCcw, User, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
+import { formatLocalTimestamp, parseServerTimestamp } from "@/lib/time";
 
 interface VersionHistoryProps {
   workspaceId: string;
@@ -35,7 +36,7 @@ export default function VersionHistory({ workspaceId, fileId, onRestore }: Versi
   };
 
   return (
-    <div className="flex flex-col h-full bg-card border-l border-border">
+    <div className="flex flex-col h-full bg-[rgba(17,24,39,0.75)] border-l border-white/10 backdrop-blur">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <History className="h-4 w-4 text-primary" />
         <h3 className="text-xs font-bold uppercase tracking-wider">Version History</h3>
@@ -75,7 +76,7 @@ export default function VersionHistory({ workspaceId, fileId, onRestore }: Versi
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                     <Clock className="h-3 w-3" />
-                    <span>{formatDistanceToNow(new Date(v.created_at), { addSuffix: true })}</span>
+                    <span title={formatLocalTimestamp(v.created_at)}>{formatDistanceToNow(parseServerTimestamp(v.created_at), { addSuffix: true })}</span>
                   </div>
                 </div>
               </div>

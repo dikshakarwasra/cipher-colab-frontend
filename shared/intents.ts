@@ -27,41 +27,41 @@ export const INTENT_CONFIGS: Record<Intent, IntentConfig> = {
     id: INTENTS.FEATURE_DEVELOPMENT,
     label: "Feature Development",
     description: "Building new features and functionality",
-    color: "#1976D2", // Primary Blue
-    bgColor: "rgba(25, 118, 210, 0.1)",
-    borderColor: "rgba(25, 118, 210, 0.3)",
+    color: "#38BDF8",
+    bgColor: "rgba(56, 189, 248, 0.12)",
+    borderColor: "rgba(103, 232, 249, 0.36)",
   },
   [INTENTS.DEBUGGING]: {
     id: INTENTS.DEBUGGING,
     label: "Debugging",
     description: "Fixing bugs and issues",
-    color: "#E53935", // Danger Red
-    bgColor: "rgba(229, 57, 53, 0.1)",
-    borderColor: "rgba(229, 57, 53, 0.3)",
+    color: "#F87171",
+    bgColor: "rgba(248, 113, 113, 0.12)",
+    borderColor: "rgba(248, 113, 113, 0.32)",
   },
   [INTENTS.REFACTORING]: {
     id: INTENTS.REFACTORING,
     label: "Refactoring",
     description: "Improving code structure and quality",
-    color: "#9C27B0", // Purple
-    bgColor: "rgba(156, 39, 176, 0.1)",
-    borderColor: "rgba(156, 39, 176, 0.3)",
+    color: "#A78BFA",
+    bgColor: "rgba(167, 139, 250, 0.12)",
+    borderColor: "rgba(167, 139, 250, 0.34)",
   },
   [INTENTS.TESTING]: {
     id: INTENTS.TESTING,
     label: "Testing",
     description: "Writing and improving tests",
-    color: "#2ECC71", // Success Green
-    bgColor: "rgba(46, 204, 113, 0.1)",
-    borderColor: "rgba(46, 204, 113, 0.3)",
+    color: "#34D399",
+    bgColor: "rgba(52, 211, 153, 0.12)",
+    borderColor: "rgba(52, 211, 153, 0.34)",
   },
   [INTENTS.DOCUMENTATION]: {
     id: INTENTS.DOCUMENTATION,
     label: "Documentation",
     description: "Writing and updating documentation",
-    color: "#FFB74D", // Orange
-    bgColor: "rgba(255, 183, 77, 0.1)",
-    borderColor: "rgba(255, 183, 77, 0.3)",
+    color: "#FBBF24",
+    bgColor: "rgba(251, 191, 36, 0.12)",
+    borderColor: "rgba(251, 191, 36, 0.34)",
   },
 };
 

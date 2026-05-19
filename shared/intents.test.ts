@@ -60,7 +60,7 @@ describe("Intent System", () => {
     it("getIntentConfig should return correct config", () => {
       const config = getIntentConfig(INTENTS.FEATURE_DEVELOPMENT);
       expect(config.label).toBe("Feature Development");
-      expect(config.color).toBe("#1976D2");
+      expect(config.color).toBe("#38BDF8");
     });
 
     it("getIntentLabel should return correct label", () => {
@@ -71,22 +71,22 @@ describe("Intent System", () => {
     });
 
     it("getIntentColor should return correct color", () => {
-      expect(getIntentColor(INTENTS.FEATURE_DEVELOPMENT)).toBe("#1976D2");
-      expect(getIntentColor(INTENTS.DEBUGGING)).toBe("#E53935");
-      expect(getIntentColor(INTENTS.REFACTORING)).toBe("#9C27B0");
-      expect(getIntentColor(INTENTS.TESTING)).toBe("#2ECC71");
-      expect(getIntentColor(INTENTS.DOCUMENTATION)).toBe("#FFB74D");
+      expect(getIntentColor(INTENTS.FEATURE_DEVELOPMENT)).toBe("#38BDF8");
+      expect(getIntentColor(INTENTS.DEBUGGING)).toBe("#F87171");
+      expect(getIntentColor(INTENTS.REFACTORING)).toBe("#A78BFA");
+      expect(getIntentColor(INTENTS.TESTING)).toBe("#34D399");
+      expect(getIntentColor(INTENTS.DOCUMENTATION)).toBe("#FBBF24");
     });
   });
 
   describe("Color palette", () => {
     it("should have distinct colors for each intent", () => {
       const colors = {
-        [INTENTS.FEATURE_DEVELOPMENT]: "#1976D2", // Blue
-        [INTENTS.DEBUGGING]: "#E53935", // Red
-        [INTENTS.REFACTORING]: "#9C27B0", // Purple
-        [INTENTS.TESTING]: "#2ECC71", // Green
-        [INTENTS.DOCUMENTATION]: "#FFB74D", // Orange
+        [INTENTS.FEATURE_DEVELOPMENT]: "#38BDF8",
+        [INTENTS.DEBUGGING]: "#F87171",
+        [INTENTS.REFACTORING]: "#A78BFA",
+        [INTENTS.TESTING]: "#34D399",
+        [INTENTS.DOCUMENTATION]: "#FBBF24",
       };
 
       Object.entries(colors).forEach(([intent, expectedColor]) => {

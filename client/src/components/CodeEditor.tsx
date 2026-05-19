@@ -118,9 +118,9 @@ export default function CodeEditor({
   }
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-[#0B1220]">
       {!compact && (
-        <div className="px-4 py-3 border-b border-border bg-card">
+        <div className="px-4 py-3 border-b border-white/10 bg-[rgba(17,24,39,0.75)] backdrop-blur">
           <h2 className="text-sm font-semibold text-foreground">{fileName}</h2>
           <p className="text-xs text-muted-foreground">
             {language} · editing with{" "}
@@ -133,7 +133,7 @@ export default function CodeEditor({
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Line numbers */}
-        <div className="select-none overflow-hidden bg-card border-r border-border/50 text-right flex-shrink-0">
+        <div className="select-none overflow-hidden border-r border-white/10 bg-[#111827]/70 text-right flex-shrink-0">
           <div className="pt-2 px-3">
             {Array.from({ length: lineCount }, (_, i) => (
               <div key={i + 1} className="font-mono text-[11px] leading-6 text-muted-foreground/60">{i + 1}</div>
@@ -216,7 +216,7 @@ export default function CodeEditor({
             onChange={handleContentChange}
             onKeyDown={handleKeyDown}
             onScroll={syncOverlayScroll}
-            className="absolute inset-0 w-full h-full resize-none bg-transparent font-mono text-[13px] text-foreground pt-2 px-4 focus:outline-none leading-6"
+            className="absolute inset-0 w-full h-full resize-none bg-transparent font-mono text-[13px] text-[#F8FAFC] caret-[#67E8F9] pt-2 px-4 focus:outline-none leading-6"
             spellCheck={false}
             style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', monospace", tabSize: 2 }}
           />
@@ -263,7 +263,7 @@ export default function CodeEditor({
       </div>
 
       {!compact && (
-        <div className="px-4 py-2 border-t border-border bg-card flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="px-4 py-2 border-t border-white/10 bg-[rgba(17,24,39,0.75)] flex items-center justify-between text-[11px] text-[#94A3B8]">
           <span>Ln {cursorLine}, Col {cursorColumn}</span>
           <span>UTF-8 · {language} · LF</span>
           {fileChanges.length > 0 && (

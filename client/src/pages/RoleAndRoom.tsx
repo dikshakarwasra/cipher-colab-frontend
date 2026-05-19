@@ -79,17 +79,17 @@ export default function RoleAndRoom() {
   };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="min-h-screen cipher-ambient bg-[#0F172A] text-[#F8FAFC]">
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-border bg-card/90 px-4 py-3 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-white/10 bg-[#111827]/85 px-4 py-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded bg-primary">
-              <Code2 className="h-4 w-4 text-white" />
+            <div className="flex h-7 w-7 items-center justify-center rounded bg-[#38BDF8] shadow-lg shadow-[#38BDF8]/25">
+              <Code2 className="h-4 w-4 text-[#0F172A]" />
             </div>
             <div>
               <h1 className="text-base font-black leading-none">Cipher Collab</h1>
-              <p className="text-[10px] text-muted-foreground">Cloud synced workspace</p>
+              <p className="text-[10px] text-[#94A3B8]">Cloud synced workspace</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -105,25 +105,25 @@ export default function RoleAndRoom() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="relative grid gap-5 lg:grid-cols-2">
 
           {/* ── LEFT COLUMN ─────────────────────────────────── */}
           <div className="space-y-5">
 
             {/* Recent workspaces */}
-            <div className="rounded-xl border border-border bg-card p-4">
+            <div className="glass-panel rounded-lg p-4">
               <h2 className="mb-3 text-base font-bold">Continue where you left off</h2>
               {workspaces.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
+                <div className="rounded-lg border border-dashed border-white/15 bg-[#111827]/45 p-5 text-center text-sm text-[#94A3B8]">
                   No recent rooms yet. Create one and it will appear here.
                 </div>
               ) : (
                 <div className="space-y-2">
                   {workspaces.map((ws) => (
-                    <div key={ws.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2.5">
+                    <div key={ws.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-[#111827]/65 px-3 py-2.5 hover:bg-[#1E293B]">
                       <button className="min-w-0 flex-1 text-left" onClick={() => enterWorkspace(ws.id)}>
                         <div className="truncate font-medium text-sm">{ws.name}</div>
-                        <div className="font-mono text-xs text-muted-foreground">{ws.room_id}</div>
+                        <div className="font-mono text-xs text-[#94A3B8]">{ws.room_id}</div>
                       </button>
                       <Button size="sm" variant="ghost" className="ml-2 h-7 w-7 p-0 flex-shrink-0" onClick={() => copyRoom(ws)}>
                         {copied === ws.room_id ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
@@ -135,7 +135,7 @@ export default function RoleAndRoom() {
             </div>
 
             {/* Join workspace */}
-            <form onSubmit={handleJoin} className="rounded-xl border border-border bg-card p-4">
+            <form onSubmit={handleJoin} className="glass-panel rounded-lg p-4">
               <h2 className="mb-3 text-base font-bold">Join workspace</h2>
               <div className="space-y-4">
                 <div className="grid gap-1.5">
@@ -160,7 +160,7 @@ export default function RoleAndRoom() {
                           key={item.id}
                           type="button"
                           onClick={() => setRole(item.id)}
-                          className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition ${role === item.id ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary/20 text-muted-foreground hover:border-primary/50 hover:text-foreground"}`}
+                          className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition ${role === item.id ? "border-[#38BDF8] bg-[#38BDF8]/10 text-[#67E8F9] shadow-[0_0_28px_rgba(56,189,248,.16)]" : "border-white/10 bg-[#111827]/55 text-[#94A3B8] hover:border-[#67E8F9]/50 hover:bg-[#1E293B] hover:text-[#F8FAFC]"}`}
                         >
                           <Icon className="h-4 w-4" />
                           <span className="text-xs font-semibold">{item.label}</span>
@@ -171,7 +171,7 @@ export default function RoleAndRoom() {
                   </div>
                 </div>
 
-                <Button className="h-10 w-full gap-2" disabled={loading || !roomId}>
+                <Button className="h-10 w-full gap-2 bg-[#38BDF8] text-[#0F172A] hover:bg-[#67E8F9]" disabled={loading || !roomId}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
                   Join or request approval
                 </Button>
@@ -180,13 +180,13 @@ export default function RoleAndRoom() {
           </div>
 
           {/* ── RIGHT COLUMN ────────────────────────────────── */}
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="glass-panel rounded-lg p-4">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold">Create workspace</h2>
-                <p className="text-xs text-muted-foreground">Choose a template and start a secure live session.</p>
+                <p className="text-xs text-[#94A3B8]">Choose a template and start a secure live session.</p>
               </div>
-              <span className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
+              <span className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-[#38BDF8]/10 px-3 py-1 text-xs text-[#67E8F9]">
                 <Cloud className="h-3 w-3" /> Cloud synced
               </span>
             </div>
@@ -211,9 +211,9 @@ export default function RoleAndRoom() {
                       key={item.id}
                       type="button"
                       onClick={() => setTemplate(item.id)}
-                      className={`flex flex-col items-start rounded-lg border p-3 text-left transition ${template === item.id ? "border-accent bg-accent/10 text-foreground" : "border-border bg-secondary/20 text-muted-foreground hover:border-accent/50 hover:text-foreground"}`}
+                      className={`flex flex-col items-start rounded-lg border p-3 text-left transition ${template === item.id ? "border-[#67E8F9] bg-[#38BDF8]/10 text-[#F8FAFC] shadow-[0_0_28px_rgba(103,232,249,.13)]" : "border-white/10 bg-[#111827]/55 text-[#94A3B8] hover:border-[#67E8F9]/50 hover:bg-[#1E293B] hover:text-[#F8FAFC]"}`}
                     >
-                      <Icon className={`mb-2 h-5 w-5 ${template === item.id ? "text-accent" : "text-muted-foreground"}`} />
+                      <Icon className={`mb-2 h-5 w-5 ${template === item.id ? "text-[#67E8F9]" : "text-[#94A3B8]"}`} />
                       <div className="text-xs font-semibold">{item.label}</div>
                       <div className="mt-0.5 text-[10px] opacity-70 leading-snug">{item.desc}</div>
                     </button>
@@ -224,7 +224,7 @@ export default function RoleAndRoom() {
               <Button
                 onClick={handleCreate}
                 disabled={loading || !workspaceName.trim()}
-                className="h-10 w-full gap-2"
+                className="h-10 w-full gap-2 bg-[#38BDF8] text-[#0F172A] hover:bg-[#67E8F9]"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                 Create and enter workspace

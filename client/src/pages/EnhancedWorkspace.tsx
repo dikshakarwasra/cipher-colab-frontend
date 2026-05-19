@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  Clock,
   Code2,
   FileCode,
   FileJson,
@@ -56,6 +57,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { clearAuth } from "@/lib/api";
+import { formatLocalTime, formatLocalTimestamp, parseServerTimestamp } from "@/lib/time";
 
 type ConnectionState = "connected" | "reconnecting" | "offline";
 type MemberStatus = "online" | "editing" | "reviewing" | "testing" | "offline";
@@ -65,6 +67,7 @@ interface MemberWithStatus extends ApiMember {
   status: MemberStatus;
   editingFile?: string;
   currentIntent?: Intent;
+  currentIntentUpdatedAt?: string | number;
 }
 
 interface TreeNode {
@@ -223,6 +226,14 @@ const INTENT_ICON: Record<string, string> = {
   testing: "✅",
 };
 
+const INTENT_BADGE: Record<string, string> = {
+  debugging: "DBG",
+  feature_development: "FEAT",
+  refactoring: "REF",
+  documentation: "DOC",
+  testing: "TEST",
+};
+
 function detectLanguage(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
@@ -290,6 +301,25 @@ export default function EnhancedWorkspace() {
   }>>(new Map());
 
   const selectedFile = files.find((f) => f.id === activeTabId) ?? files[0];
+
+  const showIntentChangeToast = useCallback((userName: string, nextIntent: Intent, changedAt: string | number | Date) => {
+    const config = INTENT_CONFIGS[nextIntent];
+    toast.custom(() => (
+      <div className="glass-panel min-w-[260px] rounded-lg px-4 py-3 text-[#F8FAFC] shadow-2xl">
+        <div className="flex items-center gap-3">
+          <span className="h-2.5 w-2.5 rounded-full shadow-[0_0_18px_currentColor]" style={{ background: config.color, color: config.color }} />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{userName}</p>
+            <p className="text-xs text-[#94A3B8]">Switched to {config.label}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[10px] text-[#67E8F9]">
+              <Clock className="h-3 w-3" />
+              {formatLocalTimestamp(changedAt)}
+            </p>
+          </div>
+        </div>
+      </div>
+    ));
+  }, []);
 
   const loadWorkspace = useCallback(async () => {
     if (!workspaceId) return;
@@ -388,11 +418,15 @@ export default function EnhancedWorkspace() {
               if (payload.activity) setActivity((prev) => [payload.activity, ...prev]);
               break;
             case "intent_change":
-              toast.info(`${payload.user?.displayName ?? "Someone"} switched to ${payload.intent}`);
+              {
+                const changedAt = payload.changedAt ?? payload.createdAt ?? Date.now();
+                const userName = payload.user?.displayName ?? payload.user?.username ?? "Someone";
+                showIntentChangeToast(userName, payload.intent, changedAt);
+              }
               if (payload.userId) {
                 setMembers((prev) =>
                   prev.map((m) =>
-                    m.user_id === payload.userId ? { ...m, currentIntent: payload.intent, status: "editing" } : m
+                    m.user_id === payload.userId ? { ...m, currentIntent: payload.intent, currentIntentUpdatedAt: payload.changedAt ?? Date.now(), status: "editing" } : m
                   )
                 );
               }
@@ -487,7 +521,7 @@ export default function EnhancedWorkspace() {
       if (pingRef.current) clearInterval(pingRef.current);
       clearInterval(refreshInterval);
     };
-  }, [workspaceId]);
+  }, [workspaceId, showIntentChangeToast]);
 
   // Auto scroll chat to bottom
   useEffect(() => {
@@ -592,8 +626,17 @@ export default function EnhancedWorkspace() {
   };
 
   const switchIntent = (next: Intent) => {
+    const changedAt = new Date().toISOString();
     setIntent(next);
-    socketRef.current?.send(JSON.stringify({ type: "intent_change", intent: next }));
+    if (currentUser) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.user_id === currentUser.id ? { ...m, currentIntent: next, currentIntentUpdatedAt: changedAt, status: "editing" } : m
+        )
+      );
+      showIntentChangeToast(currentUser.display_name || currentUser.username, next, changedAt);
+    }
+    socketRef.current?.send(JSON.stringify({ type: "intent_change", intent: next, changedAt }));
   };
 
   // Create a new blank file, prompt by name in the tab bar
@@ -696,7 +739,7 @@ export default function EnhancedWorkspace() {
           id: a.id,
           userId: String(a.user_id ?? "system"),
           username: "Collaborator",
-          timestamp: new Date(a.created_at).getTime(),
+          timestamp: parseServerTimestamp(a.created_at).getTime(),
           intent: a.intent as Intent,
           lineStart: 1,
           lineEnd: selectedFile?.content.split("\n").length ?? 1,
@@ -716,17 +759,17 @@ export default function EnhancedWorkspace() {
   }
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    <main className="cipher-ambient flex h-screen flex-col overflow-hidden bg-[#0F172A] text-[#F8FAFC]">
       {/* ── HEADER ─────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 shrink-0">
+      <header className="relative z-10 flex items-center justify-between gap-2 border-b border-white/10 bg-[#111827]/85 px-3 py-2 shrink-0 backdrop-blur-xl">
         {/* Left: logo + breadcrumb */}
         <div className="flex items-center gap-2 min-w-0">
           <button onClick={() => setLeftOpen((v) => !v)} className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground lg:hidden">
             <Menu className="h-4 w-4" />
           </button>
           <div className="flex items-center gap-1.5 min-w-0">
-            <div className="h-6 w-6 rounded bg-primary flex items-center justify-center flex-shrink-0">
-              <Code2 className="h-3.5 w-3.5 text-white" />
+            <div className="h-6 w-6 rounded bg-[#38BDF8] flex items-center justify-center flex-shrink-0 shadow-lg shadow-[#38BDF8]/25">
+              <Code2 className="h-3.5 w-3.5 text-[#0F172A]" />
             </div>
             <span className="font-bold text-sm hidden sm:block">Cipher Collab</span>
           </div>
@@ -832,14 +875,14 @@ export default function EnhancedWorkspace() {
       </header>
 
       {/* ── BODY ───────────────────────────────────────────────── */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
 
         {/* ── LEFT PANE: Explorer ─────────────────────────────── */}
         {/* Mobile overlay backdrop */}
         {leftOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setLeftOpen(false)} />}
         <aside
           className={[
-            "flex flex-col shrink-0 border-r border-border bg-card overflow-hidden",
+            "glass-panel flex flex-col shrink-0 border-r border-white/10 overflow-hidden",
             "fixed inset-y-0 left-0 z-50 w-52 transition-transform",
             leftOpen ? "translate-x-0" : "-translate-x-full",
             "lg:static lg:z-auto lg:translate-x-0 lg:transition-[width]",
@@ -913,7 +956,7 @@ export default function EnhancedWorkspace() {
         {/* ── CENTER PANE ─────────────────────────────────────── */}
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Collaboration Intents Bar */}
-          <div className="flex min-w-0 items-center gap-3 border-b border-border bg-card px-4 py-2 shrink-0">
+          <div className="flex min-w-0 items-center gap-3 border-b border-white/10 bg-[rgba(17,24,39,0.75)] px-4 py-2 shrink-0 backdrop-blur-xl">
             <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
               Collaboration Intents
             </span>
@@ -925,10 +968,11 @@ export default function EnhancedWorkspace() {
                   <button
                     key={key}
                     onClick={() => switchIntent(key as Intent)}
-                    className={`flex h-8 min-w-[132px] shrink-0 snap-start items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors sm:min-w-[156px] ${isActive ? "border-transparent text-white" : "border-border text-muted-foreground hover:border-border/80 hover:text-foreground"}`}
-                    style={isActive ? { background: cfg.color } : { background: cfg.bgColor }}
+                    data-active={isActive}
+                    className={`intent-card flex h-9 min-w-[144px] shrink-0 snap-start items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs whitespace-nowrap transition sm:min-w-[170px] ${isActive ? "text-white shadow-[0_0_24px_rgba(56,189,248,.22)]" : "text-[#94A3B8] hover:text-[#F8FAFC]"}`}
+                    style={{ borderColor: isActive ? cfg.borderColor : "rgba(148,163,184,0.18)", background: cfg.bgColor }}
                   >
-                    <span className="shrink-0">{INTENT_ICON[key]}</span>
+                    <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 font-mono text-[9px]" style={{ color: cfg.color }}>{INTENT_BADGE[key]}</span>
                     <span className="min-w-0 truncate font-medium">{cfg.label.replace(" Development", " Dev")}</span>
                     <span className="shrink-0 opacity-70">{count}</span>
                   </button>
@@ -941,7 +985,7 @@ export default function EnhancedWorkspace() {
           </div>
 
           {/* File Tabs */}
-          <div className="flex items-center border-b border-border bg-card shrink-0">
+          <div className="flex items-center border-b border-white/10 bg-[rgba(17,24,39,0.75)] shrink-0 backdrop-blur-xl">
             <div className="flex min-w-0 flex-1 overflow-x-auto">
               {openTabs.map((tabId) => {
                 const file = files.find((f) => f.id === tabId);
@@ -952,7 +996,7 @@ export default function EnhancedWorkspace() {
                   <div
                     key={tabId}
                     onClick={() => setActiveTabId(tabId)}
-                    className={`flex items-center gap-1.5 border-r border-border px-3 py-2 text-xs cursor-pointer select-none whitespace-nowrap ${isActive ? "bg-background text-foreground border-b-2 border-b-primary" : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"}`}
+                    className={`flex items-center gap-1.5 border-r border-white/10 px-3 py-2 text-xs cursor-pointer select-none whitespace-nowrap ${isActive ? "bg-[#0B1220] text-[#F8FAFC] border-b-2 border-b-[#38BDF8]" : "text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#F8FAFC]"}`}
                   >
                     <span className="flex h-3.5 w-4 items-center justify-center">{getFileIcon(file.name)}</span>
                     <span>{file.name}</span>
@@ -1096,7 +1140,7 @@ export default function EnhancedWorkspace() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-1.5">
                           <span className="text-xs font-semibold">{msg.username}</span>
-                          <span className="text-[10px] text-muted-foreground">{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="text-[10px] text-muted-foreground">{formatLocalTime(msg.created_at)}</span>
                           {msg.intent && (
                             <span className="rounded px-1 text-[9px]" style={{ background: INTENT_CONFIGS[msg.intent]?.bgColor, color: INTENT_CONFIGS[msg.intent]?.color }}>
                               {INTENT_CONFIGS[msg.intent]?.label}
@@ -1132,7 +1176,7 @@ export default function EnhancedWorkspace() {
         {rightOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setRightOpen(false)} />}
         <aside
           className={[
-            "flex flex-col shrink-0 border-l border-border bg-card overflow-hidden transition-all",
+            "glass-panel flex flex-col shrink-0 border-l border-white/10 overflow-hidden transition-all",
             "fixed inset-y-0 right-0 z-50 transition-transform",
             rightOpen ? "translate-x-0" : "translate-x-full",
             "lg:static lg:z-auto lg:translate-x-0 lg:transition-[width]",
@@ -1229,7 +1273,9 @@ export default function EnhancedWorkspace() {
                       {m.role === "admin" && <span className="text-accent text-[11px]">👑</span>}
                     </div>
                     <div className="text-[10px] text-muted-foreground truncate">
-                      {editingFileName ?? (m.editingFile ? "editing..." : m.username)}
+                      {m.currentIntent
+                        ? `${INTENT_CONFIGS[m.currentIntent].label} - ${m.currentIntentUpdatedAt ? formatLocalTime(m.currentIntentUpdatedAt) : "just now"}`
+                        : editingFileName ?? (m.editingFile ? "editing..." : m.username)}
                     </div>
                   </div>
 
@@ -1293,7 +1339,7 @@ export default function EnhancedWorkspace() {
                       <span className="text-muted-foreground">{item.action.replaceAll("_", " ")}</span>
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {formatLocalTime(item.created_at)}
                       {item.intent && (
                         <span className="ml-1" style={{ color: INTENT_CONFIGS[item.intent as Intent]?.color }}>
                           · {INTENT_CONFIGS[item.intent as Intent]?.label}
