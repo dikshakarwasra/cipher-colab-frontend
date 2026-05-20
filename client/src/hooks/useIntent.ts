@@ -5,8 +5,8 @@ import { INTENTS, type Intent } from "@shared/intents";
  * Hook for managing user's current collaboration intent
  * Persists intent selection to localStorage
  */
-export function useIntent(defaultIntent: Intent = INTENTS.FEATURE_DEVELOPMENT) {
-  const [intent, setIntent] = useState<Intent>(() => {
+export function useIntent(defaultIntent: Intent | null = null) {
+  const [intent, setIntent] = useState<Intent | null>(() => {
     // Try to load from localStorage
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("cipherCollabIntent");

@@ -17,7 +17,7 @@ import {
   type ApiVersion,
 } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
-import { INTENT_CONFIGS, INTENTS, type Intent } from "@shared/intents";
+import { INTENT_CONFIGS, type Intent } from "@shared/intents";
 import {
   Bell,
   Check,
@@ -136,6 +136,36 @@ function getStatusColor(status: MemberStatus) {
     case "reviewing": return "#1976D2";
     case "testing": return "#9C27B0";
     case "offline": return "#6B7280";
+  }
+}
+
+function getActivityDescription(item: ApiActivity) {
+  const intentLabel = item.intent ? INTENT_CONFIGS[item.intent as Intent]?.label : null;
+  switch (item.action) {
+    case "changed_intent":
+      return `changed intent${intentLabel ? ` to ${intentLabel}` : ""}`;
+    case "sent_chat_message":
+    case "chat_message":
+      return "sent a chat message";
+    case "saved_file":
+    case "file_updated":
+      return "saved a file";
+    case "edited_file":
+      return "edited a file";
+    case "joined_workspace":
+      return "joined the workspace";
+    case "left_workspace":
+      return "left the workspace";
+    case "workspace_frozen":
+      return "froze editing";
+    case "workspace_unfrozen":
+      return "unfroze editing";
+    case "file_locked":
+      return "locked a file";
+    case "file_unlocked":
+      return "unlocked a file";
+    default:
+      return item.action.replaceAll("_", " ");
   }
 }
 
@@ -262,7 +292,6 @@ export default function EnhancedWorkspace() {
   const [joinRequests, setJoinRequests] = useState<ApiJoinRequest[]>([]);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
-  const [intent, setIntent] = useState<Intent>(INTENTS.FEATURE_DEVELOPMENT);
   const [connection, setConnection] = useState<ConnectionState>("reconnecting");
   const [latency, setLatency] = useState<number>(0);
   const [chatDraft, setChatDraft] = useState("");
@@ -274,12 +303,57 @@ export default function EnhancedWorkspace() {
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth >= 1024);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [modifiedFiles, setModifiedFiles] = useState<Set<string>>(new Set());
+  const [intent, setIntent] = useState<Intent | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const knownActivityIds = useRef<Set<string>>(new Set());
   const [showMoreMembers, setShowMoreMembers] = useState(false);
-  const [intentCounts, setIntentCounts] = useState<Record<string, number>>({});
   const [showVersions, setShowVersions] = useState(false);
   const [showSecurityLogs, setShowSecurityLogs] = useState(false);
+
+  const isValidIntent = useCallback((value: unknown): value is Intent => {
+    return typeof value === "string" && Object.prototype.hasOwnProperty.call(INTENT_CONFIGS, value);
+  }, []);
+
+  const addActivityItem = useCallback((item: ApiActivity) => {
+    if (knownActivityIds.current.has(item.id)) return;
+    knownActivityIds.current.add(item.id);
+    setActivity((prev) =>
+      [item, ...prev].sort((a, b) => parseServerTimestamp(b.created_at).getTime() - parseServerTimestamp(a.created_at).getTime())
+    );
+  }, []);
+
+  const mergeActivityItems = useCallback((items: ApiActivity[]) => {
+    setActivity((prev) => {
+      const merged = new Map<string, ApiActivity>();
+      for (const item of prev) merged.set(item.id, item);
+      for (const item of items) merged.set(item.id, item);
+      knownActivityIds.current = new Set(merged.keys());
+      return Array.from(merged.values()).sort(
+        (a, b) => parseServerTimestamp(b.created_at).getTime() - parseServerTimestamp(a.created_at).getTime()
+      );
+    });
+  }, []);
+
+  const addChatMessage = useCallback((message: ApiChatMessage) => {
+    setMessages((prev) => (prev.some((existing) => existing.id === message.id) ? prev : [...prev, message]));
+  }, []);
+
+  const buildClientActivity = useCallback((params: {
+    action: string;
+    intent?: Intent | null;
+    file_id?: string | null;
+    details?: string | null;
+  }): ApiActivity => ({
+    id: `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    workspace_id: workspaceId,
+    user_id: currentUser?.id ?? null,
+    action: params.action,
+    intent: params.intent ?? null,
+    file_id: params.file_id ?? null,
+    details: params.details ?? null,
+    created_at: new Date().toISOString(),
+  }), [currentUser?.id, workspaceId]);
   const [inviteUsername, setInviteUsername] = useState("");
   const [showInvite, setShowInvite] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
@@ -287,6 +361,7 @@ export default function EnhancedWorkspace() {
   const pingTimeRef = useRef<number>(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const rangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editActivityRef = useRef<Record<string, number>>({});
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const mobileInitRef = useRef(false);
 
@@ -333,25 +408,24 @@ export default function EnhancedWorkspace() {
     ]);
     setWorkspace(workspaceData);
     setFiles(fileData);
-    setMembers(memberData.map((m) => ({ ...m, status: "online" as MemberStatus })));
+    const membersWithStatus = memberData.map((m) => ({
+      ...m,
+      status: "online" as MemberStatus,
+      currentIntent: m.user_id === currentUser?.id ? undefined : isValidIntent((m as any).currentIntent) ? (m as any).currentIntent : undefined,
+      currentIntentUpdatedAt: (m as any).currentIntentUpdatedAt ?? (m as any).currentIntent_updated_at ?? undefined,
+    }));
+    setMembers(membersWithStatus);
     setMessages(chatData);
-    setActivity(activityData);
+    mergeActivityItems(activityData);
     setNotifications(notifData);
 
-    api.intentSummary(workspaceId).then(summaries => {
-      const counts: Record<string, number> = {};
-      summaries.forEach(s => counts[s.intent] = s.count);
-      setIntentCounts(counts);
-    }).catch(() => {});
+    setIntent(null);
 
     if (fileData.length > 0) {
       const initialIds = fileData.slice(0, 4).map((f) => f.id);
       setOpenTabs(initialIds);
       setActiveTabId((cur) => cur || initialIds[0]);
     }
-    const counts: Record<string, number> = {};
-    activityData.forEach((a) => { if (a.intent) counts[a.intent] = (counts[a.intent] ?? 0) + 1; });
-    setIntentCounts(counts);
     const tree = buildFileTree(fileData);
     const topFolders = tree.filter((n) => n.type === "folder").map((n) => n.path);
     setOpenFolders(new Set(topFolders));
@@ -362,7 +436,7 @@ export default function EnhancedWorkspace() {
         api.getJoinRequests(workspaceId).then(setJoinRequests).catch(() => {});
       }
     }
-  }, [workspaceId, currentUser]);
+  }, [workspaceId, currentUser, isValidIntent, mergeActivityItems]);
 
   useEffect(() => {
     loadWorkspace().catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load workspace"));
@@ -410,57 +484,152 @@ export default function EnhancedWorkspace() {
                 })));
               }
               break;
-            case "chat_message":
-              if (payload.message) setMessages((prev) => [...prev, payload.message]);
-              break;
-            case "file_saved":
-              toast.info(`${payload.user?.displayName ?? "Someone"} saved a file`);
-              if (payload.activity) setActivity((prev) => [payload.activity, ...prev]);
-              break;
-            case "intent_change":
-              {
-                const changedAt = payload.changedAt ?? payload.createdAt ?? Date.now();
-                const userName = payload.user?.displayName ?? payload.user?.username ?? "Someone";
-                showIntentChangeToast(userName, payload.intent, changedAt);
+            case "chat_message": {
+              const message = payload.message ?? (payload.id ? payload : null);
+              if (message) {
+                addChatMessage(message);
               }
-              if (payload.userId) {
-                setMembers((prev) =>
-                  prev.map((m) =>
-                    m.user_id === payload.userId ? { ...m, currentIntent: payload.intent, currentIntentUpdatedAt: payload.changedAt ?? Date.now(), status: "editing" } : m
-                  )
-                );
-              }
-              setIntentCounts((prev) => ({
-                ...prev,
-                [payload.intent]: (prev[payload.intent] ?? 0) + 1,
-              }));
-              break;
-            case "yjs_update":
-              if (payload.fileId && payload.content) {
-                setFiles((prev) => prev.map((f) => f.id === payload.fileId ? { ...f, content: payload.content } : f));
-              }
-              if (payload.userId) {
-                setMembers((prev) =>
-                  prev.map((m) =>
-                    m.user_id === payload.userId ? { ...m, status: "editing", editingFile: payload.fileId } : m
-                  )
-                );
-              }
-              break;
-            case "member_joined":
-              if (payload.member) {
-                setMembers((prev) => {
-                  const exists = prev.find((m) => m.user_id === payload.member.user_id);
-                  if (exists) return prev.map((m) => m.user_id === payload.member.user_id ? { ...m, status: "online" } : m);
-                  return [...prev, { ...payload.member, status: "online" }];
+              if (payload.activity) {
+                addActivityItem(payload.activity);
+              } else if (message) {
+                addActivityItem({
+                  id: `remote-chat-${message.id}`,
+                  workspace_id: workspaceId,
+                  user_id: message.user_id,
+                  action: "sent_chat_message",
+                  intent: message.intent ?? null,
+                  file_id: null,
+                  details: message.content,
+                  created_at: message.created_at,
                 });
               }
               break;
-            case "member_left":
-              if (payload.userId) {
-                setMembers((prev) => prev.map((m) => m.user_id === payload.userId ? { ...m, status: "offline" } : m));
+            }
+            case "file_updated":
+              if (payload.fileId && typeof payload.content === "string") {
+                setFiles((prev) => prev.map((f) => f.id === payload.fileId ? { ...f, content: payload.content } : f));
+              }
+              if (payload.activity) addActivityItem(payload.activity);
+              break;
+            case "file_saved":
+              toast.info(`${payload.user?.displayName ?? "Someone"} saved a file`);
+              if (payload.activity) {
+                addActivityItem(payload.activity);
+              } else {
+                addActivityItem({
+                  id: `remote-save-${payload.fileId}-${payload.changedAt ?? Date.now()}`,
+                  workspace_id: workspaceId,
+                  user_id: payload.user?.id ?? null,
+                  action: "saved_file",
+                  intent: payload.intent ?? null,
+                  file_id: payload.fileId ?? null,
+                  details: payload.summary ?? null,
+                  created_at: payload.changedAt ?? new Date().toISOString(),
+                });
               }
               break;
+            case "workspace_frozen":
+            case "workspace_unfrozen":
+              if (typeof payload.frozen === "boolean") {
+                setWorkspace((prev) => prev ? { ...prev, is_frozen: payload.frozen } : prev);
+              }
+              if (payload.activity) addActivityItem(payload.activity);
+              break;
+            case "intent_change": {
+              if (!isValidIntent(payload.intent)) break;
+              const changedAt = payload.changedAt ?? payload.createdAt ?? Date.now();
+              const userName = payload.user?.displayName ?? payload.user?.username ?? "Someone";
+              const userId = payload.userId ?? payload.user?.id;
+              showIntentChangeToast(userName, payload.intent, changedAt);
+              if (userId) {
+                setMembers((prev) =>
+                  prev.map((m) =>
+                    m.user_id === userId ? { ...m, currentIntent: payload.intent, currentIntentUpdatedAt: payload.changedAt ?? Date.now(), status: "editing" } : m
+                  )
+                );
+              }
+              if (payload.activity) {
+                addActivityItem(payload.activity);
+              } else {
+                addActivityItem({
+                  id: `remote-intent-${userId}-${payload.intent}-${changedAt}`,
+                  workspace_id: workspaceId,
+                  user_id: userId ?? null,
+                  action: "changed_intent",
+                  intent: payload.intent ?? null,
+                  file_id: null,
+                  details: `${userName} switched intent to ${INTENT_CONFIGS[payload.intent]?.label ?? payload.intent}`,
+                  created_at: new Date(changedAt).toISOString(),
+                });
+              }
+              break;
+            }
+            case "yjs_update":
+              if (payload.fileId && typeof payload.content === "string") {
+                setFiles((prev) => prev.map((f) => f.id === payload.fileId ? { ...f, content: payload.content } : f));
+              }
+              if (payload.activity) {
+                addActivityItem(payload.activity);
+              }
+              {
+                const userId = payload.userId ?? payload.user?.id;
+                if (userId) {
+                setMembers((prev) =>
+                  prev.map((m) =>
+                    m.user_id === userId ? { ...m, status: "editing", editingFile: payload.fileId } : m
+                  )
+                );
+                }
+              }
+              break;
+            case "member_joined":
+            case "user_joined": {
+              const joined = payload.member ?? payload.user;
+              if (joined) {
+                setMembers((prev) => {
+                  const userId = joined.user_id ?? joined.id;
+                  const exists = prev.find((m) => m.user_id === userId);
+                  if (exists) return prev.map((m) => m.user_id === userId ? { ...m, status: "online", currentIntent: undefined } : m);
+                  return [...prev, {
+                    user_id: userId,
+                    username: joined.username,
+                    display_name: joined.displayName ?? joined.display_name ?? joined.username,
+                    role: joined.role ?? "viewer",
+                    muted_chat: false,
+                    status: "online",
+                  }];
+                });
+                addActivityItem({
+                  id: `remote-join-${joined.user_id ?? joined.id}-${Date.now()}`,
+                  workspace_id: workspaceId,
+                  user_id: joined.user_id ?? joined.id,
+                  action: "joined_workspace",
+                  intent: null,
+                  file_id: null,
+                  details: null,
+                  created_at: new Date().toISOString(),
+                });
+              }
+              break;
+            }
+            case "member_left":
+            case "user_left": {
+              const userId = payload.userId ?? payload.user?.id;
+              if (userId) {
+                setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, status: "offline", currentIntent: undefined } : m));
+                addActivityItem({
+                  id: `remote-left-${userId}-${Date.now()}`,
+                  workspace_id: workspaceId,
+                  user_id: userId,
+                  action: "left_workspace",
+                  intent: null,
+                  file_id: null,
+                  details: null,
+                  created_at: new Date().toISOString(),
+                });
+              }
+              break;
+            }
             case "presence_update":
               if (payload.userId && payload.status) {
                 setMembers((prev) =>
@@ -489,7 +658,7 @@ export default function EnhancedWorkspace() {
               }
               break;
             case "activity":
-              if (payload.item) setActivity((prev) => [payload.item, ...prev]);
+              if (payload.item) addActivityItem(payload.item);
               break;
             case "notification":
               if (payload.notification) setNotifications((prev) => [payload.notification, ...prev]);
@@ -502,12 +671,7 @@ export default function EnhancedWorkspace() {
     // Periodic refresh fallback
     const refreshInterval = setInterval(() => {
       api.notifications().then(setNotifications).catch(() => {});
-      api.activity(workspaceId).then(setActivity).catch(() => {});
-      api.intentSummary(workspaceId).then(summaries => {
-        const counts: Record<string, number> = {};
-        summaries.forEach(s => counts[s.intent] = s.count);
-        setIntentCounts(counts);
-      }).catch(() => {});
+      api.activity(workspaceId).then(mergeActivityItems).catch(() => {});
       api.members(workspaceId).then((data) => {
         setMembers((prev) => data.map((m) => {
           const existing = prev.find((p) => p.user_id === m.user_id);
@@ -521,7 +685,7 @@ export default function EnhancedWorkspace() {
       if (pingRef.current) clearInterval(pingRef.current);
       clearInterval(refreshInterval);
     };
-  }, [workspaceId, showIntentChangeToast]);
+  }, [workspaceId, showIntentChangeToast, addActivityItem, addChatMessage, isValidIntent, mergeActivityItems]);
 
   // Auto scroll chat to bottom
   useEffect(() => {
@@ -586,11 +750,25 @@ export default function EnhancedWorkspace() {
     });
   };
 
-  const handleContentChange = (content: string, _intent: Intent) => {
+  const handleContentChange = (content: string, _intent: Intent | null) => {
     if (!selectedFile) return;
     setFiles((prev) => prev.map((f) => f.id === selectedFile.id ? { ...f, content } : f));
     setModifiedFiles((prev) => new Set([...prev, selectedFile.id]));
-    socketRef.current?.send(JSON.stringify({ type: "yjs_update", fileId: selectedFile.id, content, intent }));
+    const now = Date.now();
+    const shouldSendActivity = now - (editActivityRef.current[selectedFile.id] ?? 0) > 5000;
+    const activityItem = shouldSendActivity
+      ? buildClientActivity({
+          action: "edited_file",
+          intent,
+          file_id: selectedFile.id,
+          details: selectedFile.name,
+        })
+      : null;
+    if (activityItem) {
+      editActivityRef.current[selectedFile.id] = now;
+      addActivityItem(activityItem);
+    }
+    socketRef.current?.send(JSON.stringify({ type: "yjs_update", fileId: selectedFile.id, content, intent, activity: activityItem }));
   };
 
   const saveFile = async () => {
@@ -601,13 +779,19 @@ export default function EnhancedWorkspace() {
         intent,
         line_start: 1,
         line_end: selectedFile.content.split("\n").length,
-        summary: `${INTENT_CONFIGS[intent].label} edit`,
+        summary: `${intent ? INTENT_CONFIGS[intent].label : "Neutral"} edit`,
       });
       setFiles((prev) => prev.map((f) => f.id === updated.id ? updated : f));
       setModifiedFiles((prev) => { const s = new Set(prev); s.delete(updated.id); return s; });
-      socketRef.current?.send(JSON.stringify({ type: "file_saved", fileId: updated.id, intent }));
+      const activityItem = buildClientActivity({
+        action: "saved_file",
+        intent,
+        file_id: selectedFile.id,
+        details: `${intent ? INTENT_CONFIGS[intent].label : "Neutral"} save`,
+      });
+      addActivityItem(activityItem);
+      socketRef.current?.send(JSON.stringify({ type: "file_saved", fileId: updated.id, intent, activity: activityItem }));
       toast.success("Saved and versioned");
-      loadWorkspace();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
     }
@@ -617,11 +801,34 @@ export default function EnhancedWorkspace() {
     if (!workspace || !chatDraft.trim()) return;
     try {
       const message = await api.sendChat(workspace.id, { content: chatDraft, intent });
-      setMessages((prev) => [...prev, message]);
-      socketRef.current?.send(JSON.stringify({ type: "chat_message", message }));
+      addChatMessage(message);
       setChatDraft("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Send failed");
+    }
+  };
+
+  const toggleFreezeEditing = async () => {
+    if (!workspace) return;
+    const frozen = !workspace.is_frozen;
+    try {
+      await api.freezeWorkspace(workspaceId, frozen);
+      setWorkspace((prev) => prev ? { ...prev, is_frozen: frozen } : prev);
+      const activityItem = buildClientActivity({
+        action: frozen ? "workspace_frozen" : "workspace_unfrozen",
+        intent,
+        details: frozen ? "Editing frozen" : "Editing unfrozen",
+      });
+      addActivityItem(activityItem);
+      socketRef.current?.send(JSON.stringify({
+        type: frozen ? "workspace_frozen" : "workspace_unfrozen",
+        frozen,
+        intent,
+        activity: activityItem,
+      }));
+      toast.success(frozen ? "Editing frozen" : "Editing unfrozen");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update freeze state");
     }
   };
 
@@ -636,7 +843,13 @@ export default function EnhancedWorkspace() {
       );
       showIntentChangeToast(currentUser.display_name || currentUser.username, next, changedAt);
     }
-    socketRef.current?.send(JSON.stringify({ type: "intent_change", intent: next, changedAt }));
+    const activityItem = buildClientActivity({
+      action: "changed_intent",
+      intent: next,
+      details: `Switched to ${INTENT_CONFIGS[next].label}`,
+    });
+    addActivityItem(activityItem);
+    socketRef.current?.send(JSON.stringify({ type: "intent_change", intent: next, changedAt, activity: activityItem }));
   };
 
   // Create a new blank file, prompt by name in the tab bar
@@ -686,7 +899,8 @@ export default function EnhancedWorkspace() {
   };
 
   // Broadcast the line the current user is editing (debounced 150ms)
-  const handleRangeChange = useCallback((line: number, editIntent: Intent) => {
+  const handleRangeChange = useCallback((line: number, editIntent: Intent | null) => {
+    if (!editIntent) return;
     if (rangeDebounceRef.current) clearTimeout(rangeDebounceRef.current);
     rangeDebounceRef.current = setTimeout(() => {
       if (selectedFile && socketRef.current?.readyState === WebSocket.OPEN) {
@@ -717,6 +931,14 @@ export default function EnhancedWorkspace() {
   const unread = notifications.filter((n) => !n.is_read).length;
   const visibleMembers = showMoreMembers ? members : members.slice(0, 5);
   const extraMembers = Math.max(0, members.length - 5);
+  const intentCounts = useMemo(() => {
+    return activity.reduce<Record<string, number>>((counts, item) => {
+      if (item.intent && isValidIntent(item.intent)) {
+        counts[item.intent] = (counts[item.intent] ?? 0) + 1;
+      }
+      return counts;
+    }, {});
+  }, [activity, isValidIntent]);
 
   const handleInvite = async () => {
     if (!workspaceId || !inviteUsername.trim()) return;
@@ -734,7 +956,7 @@ export default function EnhancedWorkspace() {
   const codeChanges = useMemo(
     () =>
       activity
-        .filter((a) => a.intent)
+        .filter((a) => a.intent && selectedFile && a.file_id === selectedFile.id && ["file_updated", "saved_file"].includes(a.action))
         .map((a) => ({
           id: a.id,
           userId: String(a.user_id ?? "system"),
@@ -799,46 +1021,6 @@ export default function EnhancedWorkspace() {
                 </span>
               )}
             </button>
-            {notifOpen && (
-              <div className={`absolute z-50 rounded-lg border border-border bg-card shadow-xl ${
-                isMobile ? 'inset-0 m-auto w-11/12 max-h-96' : 'right-0 top-8 w-72'
-              }`}>
-                <div className="flex items-center justify-between border-b border-border px-3 py-2 shrink-0">
-                  <span className="text-xs font-semibold">Notifications</span>
-                  <div className="flex gap-2">
-                    <button
-                      className="text-[10px] text-primary hover:underline"
-                      onClick={() => api.markAllNotificationsRead().then(loadWorkspace)}
-                    >
-                      Mark all read
-                    </button>
-                    <button className="text-[10px] text-muted-foreground hover:underline" onClick={() => setNotifOpen(false)}>Close</button>
-                  </div>
-                </div>
-                {joinRequests.length > 0 && (
-                  <div className="border-b border-border/50 bg-primary/5 px-3 py-2">
-                    <p className="text-xs font-semibold text-primary mb-1">{joinRequests.length} join request{joinRequests.length > 1 ? "s" : ""}</p>
-                    {joinRequests.map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 py-1">
-                        <span className="text-xs flex-1">{r.display_name} wants to join as {r.requested_role}</span>
-                        <button onClick={() => approveJoin(r.id)} className="text-[10px] text-green-400 hover:underline font-semibold">Approve</button>
-                        <button onClick={() => rejectJoin(r.id)} className="text-[10px] text-destructive hover:underline">Reject</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="max-h-64 overflow-y-auto">
-                  {notifications.length === 0 ? (
-                    <p className="p-3 text-xs text-muted-foreground">No notifications</p>
-                  ) : notifications.slice(0, 8).map((n) => (
-                    <div key={n.id} className={`border-b border-border/50 px-3 py-2 ${!n.is_read ? "bg-primary/5" : ""}`}>
-                      <p className="text-xs font-medium">{n.title}</p>
-                      <p className="text-[11px] text-muted-foreground">{n.body}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
           {/* Theme toggle */}
           <button
@@ -970,7 +1152,7 @@ export default function EnhancedWorkspace() {
                     onClick={() => switchIntent(key as Intent)}
                     data-active={isActive}
                     className={`intent-card flex h-9 min-w-[144px] shrink-0 snap-start items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs whitespace-nowrap transition sm:min-w-[170px] ${isActive ? "text-white shadow-[0_0_24px_rgba(56,189,248,.22)]" : "text-[#94A3B8] hover:text-[#F8FAFC]"}`}
-                    style={{ borderColor: isActive ? cfg.borderColor : "rgba(148,163,184,0.18)", background: cfg.bgColor }}
+                    style={{ borderColor: isActive ? cfg.borderColor : "rgba(148,163,184,0.18)", background: isActive ? cfg.bgColor : "rgba(15,23,42,0.48)" }}
                   >
                     <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 font-mono text-[9px]" style={{ color: cfg.color }}>{INTENT_BADGE[key]}</span>
                     <span className="min-w-0 truncate font-medium">{cfg.label.replace(" Development", " Dev")}</span>
@@ -1048,7 +1230,7 @@ export default function EnhancedWorkspace() {
                   size="sm"
                   variant="outline"
                   className="h-7 gap-1.5 text-xs px-2.5"
-                  onClick={() => api.freezeWorkspace(workspaceId, !workspace.is_frozen).then(loadWorkspace)}
+                  onClick={toggleFreezeEditing}
                 >
                   <Lock className="h-3 w-3" />
                   {workspace.is_frozen ? "Unfreeze" : "Freeze Editing"}
@@ -1336,7 +1518,7 @@ export default function EnhancedWorkspace() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] leading-snug">
                       <span className="font-semibold">{userName}</span>{" "}
-                      <span className="text-muted-foreground">{item.action.replaceAll("_", " ")}</span>
+                      <span className="text-muted-foreground">{getActivityDescription(item)}</span>
                     </p>
                     <p className="text-[10px] text-muted-foreground">
                       {formatLocalTime(item.created_at)}
@@ -1416,6 +1598,57 @@ export default function EnhancedWorkspace() {
         </button>
       </div>
 
+      {notifOpen && (
+        <>
+          <div className="fixed inset-0 z-[1190] bg-transparent" onClick={() => setNotifOpen(false)} />
+          <div
+            className={[
+              "fixed z-[1200] overflow-hidden rounded-xl border border-white/10 bg-[#0B1220]/95 text-[#F8FAFC]",
+              "shadow-[0_28px_90px_rgba(0,0,0,0.65)] ring-1 ring-white/5 backdrop-blur-2xl",
+              "animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150",
+              isMobile ? "left-4 right-4 top-[60px] max-h-[calc(100vh-5rem)]" : "right-4 top-[56px] w-80 max-w-[calc(100vw-2rem)]",
+            ].join(" ")}
+            role="dialog"
+            aria-label="Notifications"
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+              <span className="text-xs font-semibold">Notifications</span>
+              <div className="flex items-center gap-2">
+                <button
+                  className="text-[10px] font-medium text-[#67E8F9] hover:underline"
+                  onClick={() => api.markAllNotificationsRead().then(loadWorkspace)}
+                >
+                  Mark all read
+                </button>
+                <button className="rounded px-1.5 py-0.5 text-[10px] text-[#94A3B8] hover:bg-white/10 hover:text-white" onClick={() => setNotifOpen(false)}>Close</button>
+              </div>
+            </div>
+            {joinRequests.length > 0 && (
+              <div className="border-b border-white/10 bg-[#38BDF8]/8 px-3 py-2">
+                <p className="mb-1 text-xs font-semibold text-[#67E8F9]">{joinRequests.length} join request{joinRequests.length > 1 ? "s" : ""}</p>
+                {joinRequests.map((r) => (
+                  <div key={r.id} className="flex items-center gap-2 py-1">
+                    <span className="min-w-0 flex-1 truncate text-xs">{r.display_name} wants to join as {r.requested_role}</span>
+                    <button onClick={() => approveJoin(r.id)} className="text-[10px] font-semibold text-green-400 hover:underline">Approve</button>
+                    <button onClick={() => rejectJoin(r.id)} className="text-[10px] text-red-300 hover:underline">Reject</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="max-h-[min(22rem,calc(100vh-10rem))] overflow-y-auto p-1">
+              {notifications.length === 0 ? (
+                <p className="px-3 py-4 text-xs text-[#94A3B8]">No notifications</p>
+              ) : notifications.slice(0, 8).map((n) => (
+                <div key={n.id} className={`rounded-lg px-3 py-2 ${!n.is_read ? "bg-[#38BDF8]/10" : "hover:bg-white/5"}`}>
+                  <p className="text-xs font-medium">{n.title}</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-[#94A3B8]">{n.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Command Palette */}
       {commandOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-20 backdrop-blur" onClick={() => setCommandOpen(false)}>
@@ -1440,8 +1673,6 @@ export default function EnhancedWorkspace() {
         </div>
       )}
 
-      {/* Click outside to close notification dropdown */}
-      {notifOpen && <div className="fixed inset-0 z-30" onClick={() => setNotifOpen(false)} />}
     </main>
   );
 }

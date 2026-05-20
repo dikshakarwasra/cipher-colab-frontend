@@ -13,9 +13,9 @@ describe("useIntent hook", () => {
     localStorage.clear();
   });
 
-  it("should initialize with default intent", () => {
+  it("should initialize without a selected intent", () => {
     const { result } = renderHook(() => useIntent());
-    expect(result.current.intent).toBe(INTENTS.FEATURE_DEVELOPMENT);
+    expect(result.current.intent).toBeNull();
   });
 
   it("should initialize with custom default intent", () => {
@@ -51,12 +51,12 @@ describe("useIntent hook", () => {
     expect(result.current.intent).toBe(INTENTS.DOCUMENTATION);
   });
 
-  it("should ignore invalid stored intent and use default", () => {
+  it("should ignore invalid stored intent and remain neutral", () => {
     localStorage.setItem("cipherCollabIntent", "invalid-intent");
 
     const { result } = renderHook(() => useIntent());
 
-    expect(result.current.intent).toBe(INTENTS.FEATURE_DEVELOPMENT);
+    expect(result.current.intent).toBeNull();
   });
 
   it("should support all 5 intents", () => {

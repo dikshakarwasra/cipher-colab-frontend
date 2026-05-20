@@ -206,10 +206,10 @@ export const api = {
   files: (workspaceId: string) => request<ApiFile[]>(`/workspaces/${workspaceId}/files`),
   createFile: (workspaceId: string, payload: { name: string; path: string; language: string; content: string }) =>
     request<ApiFile>(`/workspaces/${workspaceId}/files`, { method: "POST", body: JSON.stringify(payload) }),
-  updateFile: (workspaceId: string, fileId: string, payload: { content: string; intent: Intent; line_start: number; line_end: number; summary?: string }) =>
+  updateFile: (workspaceId: string, fileId: string, payload: { content: string; intent?: Intent | null; line_start: number; line_end: number; summary?: string }) =>
     request<ApiFile>(`/workspaces/${workspaceId}/files/${fileId}`, { method: "PUT", body: JSON.stringify(payload) }),
   chat: (workspaceId: string) => request<ApiChatMessage[]>(`/workspaces/${workspaceId}/chat`),
-  sendChat: (workspaceId: string, payload: { content: string; intent?: Intent }) =>
+  sendChat: (workspaceId: string, payload: { content: string; intent?: Intent | null }) =>
     request<ApiChatMessage>(`/workspaces/${workspaceId}/chat`, { method: "POST", body: JSON.stringify(payload) }),
   activity: (workspaceId: string) => request<ApiActivity[]>(`/workspaces/${workspaceId}/activity`),
   intentSummary: (workspaceId: string) => request<ApiIntentSummary[]>(`/workspaces/${workspaceId}/intents/summary`),
